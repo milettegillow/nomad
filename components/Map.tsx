@@ -137,6 +137,8 @@ export default function Map() {
     });
     map.current = m;
 
+    m.dragRotate.disable();
+    m.touchZoomRotate.disableRotation();
     m.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
 
     m.on('moveend', () => {
@@ -175,23 +177,50 @@ export default function Map() {
     setLocationState('prompt');
     console.log('[Map] Calling navigator.geolocation.getCurrentPosition()');
 
+    const flyToLocation = (latitude: number, longitude: number) => {
+      userCoordsRef.current = { lat: latitude, lng: longitude };
+      setLocationState('granted');
+      setOverlayDismissed(true);
+      skipNextMoveEnd.current = true;
+      console.log('[Map] Flying to location and fetching cafes');
+      m.flyTo({ center: [longitude, latitude], zoom: 14, duration: 2000 });
+      fetchCafes(latitude, longitude);
+    };
+
+    const fallbackToIP = async () => {
+      console.log('[Map] Falling back to IP-based geolocation');
+      try {
+        const res = await fetch('https://ipapi.co/json/');
+        const data = await res.json();
+        if (data.latitude && data.longitude) {
+          console.log('[Map] IP geolocation — lat:', data.latitude, 'lng:', data.longitude);
+          flyToLocation(data.latitude, data.longitude);
+        } else {
+          console.error('[Map] IP geolocation returned no coords:', data);
+          setLocationState('denied');
+        }
+      } catch (e) {
+        console.error('[Map] IP geolocation failed:', e);
+        setLocationState('denied');
+      }
+    };
+
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const { latitude, longitude } = pos.coords;
-        console.log('[Map] Geolocation SUCCESS — lat:', latitude, 'lng:', longitude);
-        userCoordsRef.current = { lat: latitude, lng: longitude };
-        setLocationState('granted');
-        setOverlayDismissed(true);
-        skipNextMoveEnd.current = true;
-        console.log('[Map] Flying to user location and fetching cafes');
-        m.flyTo({ center: [longitude, latitude], zoom: 14, duration: 2000 });
-        fetchCafes(latitude, longitude);
+        console.log('[Map] Geolocation SUCCESS — lat:', pos.coords.latitude, 'lng:', pos.coords.longitude);
+        flyToLocation(pos.coords.latitude, pos.coords.longitude);
       },
       (err) => {
         console.error('[Map] Geolocation ERROR — code:', err.code, 'message:', err.message);
-        setLocationState('denied');
+        if (err.code === 1) {
+          // PERMISSION_DENIED — user explicitly said no
+          setLocationState('denied');
+        } else {
+          // POSITION_UNAVAILABLE (2) or TIMEOUT (3) — try IP fallback
+          fallbackToIP();
+        }
       },
-      { enableHighAccuracy: false, timeout: 10000 }
+      { enableHighAccuracy: false, timeout: 30000, maximumAge: 60000 }
     );
   }
 
