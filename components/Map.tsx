@@ -74,6 +74,8 @@ export default function Map() {
   const userCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
   // Guard to prevent moveend from re-fetching during a flyTo we already handle
   const skipNextMoveEnd = useRef(false);
+  // Guard to prevent double geolocation request from React strict mode
+  const geoRequested = useRef(false);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -126,53 +128,72 @@ export default function Map() {
   useEffect(() => {
     if (map.current || !mapContainer.current) return;
 
-    map.current = new mapboxgl.Map({
+    console.log('[Map] Initializing Mapbox map');
+    const m = new mapboxgl.Map({
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/dark-v11',
       center: [0, 20],
       zoom: 2,
     });
+    map.current = m;
 
-    map.current.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
+    m.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
 
-    map.current.on('moveend', () => {
+    m.on('moveend', () => {
       if (skipNextMoveEnd.current) {
         skipNextMoveEnd.current = false;
         return;
       }
-      if (map.current!.getZoom() < 10) return;
-      const center = map.current!.getCenter();
+      if (m.getZoom() < 10) return;
+      const center = m.getCenter();
       console.log('[Map] moveend — fetching cafes at:', center.lat, center.lng);
       fetchCafes(center.lat, center.lng);
     });
 
-    // Request geolocation
-    setLocationState('prompt');
+    // Wait for the map to fully load before requesting geolocation
+    m.on('load', () => {
+      console.log('[Map] Map loaded, requesting geolocation...');
+      requestGeolocation(m);
+    });
+  }, [fetchCafes]);
+
+  // Separate geolocation function that can be called safely
+  // Uses a ref guard so React strict mode double-mount doesn't cause issues
+  function requestGeolocation(m: mapboxgl.Map) {
+    if (geoRequested.current) {
+      console.log('[Map] Geolocation already requested, skipping');
+      return;
+    }
+    geoRequested.current = true;
 
     if (!navigator.geolocation) {
+      console.log('[Map] navigator.geolocation not available');
       setLocationState('denied');
       return;
     }
 
+    setLocationState('prompt');
+    console.log('[Map] Calling navigator.geolocation.getCurrentPosition()');
+
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const { latitude, longitude } = pos.coords;
-        console.log('[Map] Geolocation granted — lat:', latitude, 'lng:', longitude);
+        console.log('[Map] Geolocation SUCCESS — lat:', latitude, 'lng:', longitude);
         userCoordsRef.current = { lat: latitude, lng: longitude };
         setLocationState('granted');
         setOverlayDismissed(true);
-        // Fly to user location and fetch cafes — skip the moveend handler
         skipNextMoveEnd.current = true;
-        map.current?.flyTo({ center: [longitude, latitude], zoom: 14, duration: 2000 });
+        console.log('[Map] Flying to user location and fetching cafes');
+        m.flyTo({ center: [longitude, latitude], zoom: 14, duration: 2000 });
         fetchCafes(latitude, longitude);
       },
       (err) => {
-        console.log('[Map] Geolocation denied/error:', err.message);
+        console.error('[Map] Geolocation ERROR — code:', err.code, 'message:', err.message);
         setLocationState('denied');
       },
       { enableHighAccuracy: false, timeout: 10000 }
     );
-  }, [fetchCafes]);
+  }
 
   // Handle correction button clicks via event delegation
   useEffect(() => {
