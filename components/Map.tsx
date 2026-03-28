@@ -74,8 +74,11 @@ function popupHTML(cafe: Cafe, dark: boolean) {
   const ttShadow = dark ? '0 4px 12px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.15)';
   const qBorder = dark ? '#444' : '#ddd';
 
+  const popupBorder = dark ? '1px solid #333333' : '1px solid #e8e8e8';
+
   return `
-    <div style="font-family:system-ui;color:${text};min-width:240px;background:${bg}">
+    <div style="font-family:system-ui;color:${text};min-width:240px;background:${bg};border:${popupBorder};border-radius:12px;padding:16px">
+      ${cafe.photo_url ? `<div style="margin:-16px -16px 12px -16px"><img src="${cafe.photo_url}" alt="" style="width:100%;height:140px;object-fit:cover;border-radius:12px 12px 0 0;display:block" /></div>` : ''}
       <div style="font-weight:700;font-size:16px;margin-bottom:6px;color:${nameColor}">${cafe.name}</div>
       ${cafe.address ? `<div style="font-size:14px;color:${addrColor};margin-bottom:12px;line-height:1.4">${cafe.address}</div>` : ''}
       ${cafe.google_rating != null ? `<div style="font-size:26px;margin-bottom:10px;line-height:1">⭐ ${cafe.google_rating.toFixed(1)}</div>` : ''}
@@ -84,7 +87,7 @@ function popupHTML(cafe: Cafe, dark: boolean) {
       <div style="font-size:15px;margin-bottom:10px;line-height:1.6">Seating: ${dots(cafe.seating_rating, dark)}${cafe.seating_rating != null ? sourceLabel(cafe.confidence, dark) : ''}</div>
       <div style="margin-top:12px;margin-bottom:8px">${confidenceBadge(cafe.confidence, dark)}</div>
       ${cafe.enrichment_reason ? `<div style="font-size:12px;color:${reasonColor};font-style:italic;margin-bottom:6px;line-height:1.4">${cafe.enrichment_reason}${cafe.key_review_quote ? ` <span style="cursor:help;color:${dark ? '#666' : '#999'};font-size:11px;border:1px solid ${qBorder};border-radius:50%;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;margin-left:6px;vertical-align:middle;position:relative;font-style:normal" onmouseenter="this.querySelector('.tt').style.display='block'" onmouseleave="this.querySelector('.tt').style.display='none'">?<div class="tt" style="display:none;position:absolute;bottom:20px;left:50%;transform:translateX(-50%);background:${ttBg};color:${ttText};font-size:11px;padding:8px 10px;border-radius:8px;width:220px;z-index:9999;border:1px solid ${ttBorder};font-style:italic;line-height:1.4;box-shadow:${ttShadow};white-space:normal"><div style="color:${dark ? '#666' : '#999'};font-size:10px;margin-bottom:4px;font-style:normal">Key review:</div>"${cafe.key_review_quote}"</div></span>` : ''}</div>` : ''}
-      ${cafe.google_place_id ? `<div style="margin-bottom:8px"><a href="https://www.google.com/maps/place/?q=place_id:${cafe.google_place_id}" target="_blank" rel="noopener noreferrer" style="font-size:12px;color:${linkColor};text-decoration:none">${cafe.enrichment_reason?.toLowerCase().includes('review') ? '📍 View Google reviews' : '📍 View on Google Maps'}</a></div>` : ''}
+      ${cafe.google_place_id ? `<div style="margin-bottom:8px"><a href="https://www.google.com/maps/place/?q=place_id:${cafe.google_place_id}" target="_blank" rel="noopener noreferrer" tabindex="-1" style="outline:none;text-decoration:none;color:${linkColor};font-size:13px">${cafe.enrichment_reason?.toLowerCase().includes('review') ? '📍 View Google reviews' : '📍 View on Google Maps'}</a></div>` : ''}
       <button
         data-cafe-id="${cafe.id}"
         class="suggest-correction-btn"
@@ -381,11 +384,15 @@ export default function Map() {
       <div className="absolute z-20" style={{ top: 10, right: 10, display: 'flex', gap: 8 }}>
         <button
           onClick={toggleDarkMode}
-          className="transition-colors cursor-pointer"
-          style={{ height: 46, width: 46, borderRadius: 8, boxShadow: cardShadow, border: btnBorder, background: btnBg, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          className="cursor-pointer"
+          style={{ height: 46, borderRadius: 8, boxShadow: cardShadow, border: btnBorder, background: btnBg, padding: '0 12px', display: 'flex', alignItems: 'center', gap: 0 }}
           title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
         >
-          {darkMode ? '☀️' : '🌙'}
+          <div style={{ width: 52, height: 28, borderRadius: 14, background: darkMode ? '#333' : '#e0e0e0', position: 'relative', transition: 'background 0.25s', flexShrink: 0 }}>
+            <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, left: darkMode ? 27 : 3, transition: 'left 0.25s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}>
+              {darkMode ? '🌙' : '☀️'}
+            </div>
+          </div>
         </button>
         <button
           onClick={handleMyLocation}
@@ -453,6 +460,7 @@ export default function Map() {
       {correctionCafe && (
         <CorrectionPanel
           cafe={correctionCafe}
+          darkMode={darkMode}
           onClose={() => setCorrectionCafe(null)}
           onSubmitted={() => {
             setCorrectionCafe(null);

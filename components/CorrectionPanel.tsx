@@ -7,10 +7,12 @@ export default function CorrectionPanel({
   cafe,
   onClose,
   onSubmitted,
+  darkMode = false,
 }: {
   cafe: Cafe;
   onClose: () => void;
   onSubmitted: () => void;
+  darkMode?: boolean;
 }) {
   const [laptopAllowed, setLaptopAllowed] = useState<boolean | null>(null);
   const [wifiRating, setWifiRating] = useState<number | null>(null);
@@ -18,6 +20,8 @@ export default function CorrectionPanel({
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+
+  const d = darkMode;
 
   const submit = async () => {
     setSubmitting(true);
@@ -40,18 +44,28 @@ export default function CorrectionPanel({
     }
   };
 
-  const laptopBtn = (label: string, value: boolean | null) => (
-    <button
-      onClick={() => setLaptopAllowed(value)}
-      className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
-        laptopAllowed === value
-          ? 'bg-white/20 text-white border border-white/30'
-          : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
-      }`}
-    >
-      {label}
-    </button>
-  );
+  const laptopBtn = (label: string, value: boolean | null) => {
+    const active = laptopAllowed === value;
+    return (
+      <button
+        onClick={() => setLaptopAllowed(value)}
+        style={{
+          flex: 1,
+          padding: '10px 0',
+          borderRadius: 8,
+          fontSize: 14,
+          fontWeight: 500,
+          transition: 'all 0.15s',
+          cursor: 'pointer',
+          background: active ? '#1a73e8' : (d ? '#2a2a2a' : '#f5f5f5'),
+          color: active ? '#fff' : (d ? '#ccc' : '#333'),
+          border: active ? '1px solid #1a73e8' : `1px solid ${d ? '#444' : '#e0e0e0'}`,
+        }}
+      >
+        {label}
+      </button>
+    );
+  };
 
   const starRow = (
     label: string,
@@ -59,32 +73,44 @@ export default function CorrectionPanel({
     setter: (n: number | null) => void
   ) => (
     <div>
-      <label className="text-xs text-gray-400 mb-1.5 block">{label}</label>
-      <div className="flex gap-1">
-        {[1, 2, 3, 4, 5].map((n) => (
-          <button
-            key={n}
-            onClick={() => setter(value === n ? null : n)}
-            className={`w-9 h-9 rounded-lg text-sm transition-all ${
-              value != null && n <= value
-                ? 'bg-yellow-500/30 text-yellow-400 border border-yellow-500/40'
-                : 'bg-white/5 text-gray-500 border border-white/10 hover:bg-white/10'
-            }`}
-          >
-            ★
-          </button>
-        ))}
+      <label style={{ fontSize: 13, color: d ? '#9ca3af' : '#666', display: 'block', marginBottom: 8 }}>{label}</label>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {[1, 2, 3, 4, 5].map((n) => {
+          const active = value != null && n <= value;
+          return (
+            <button
+              key={n}
+              onClick={() => setter(value === n ? null : n)}
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 8,
+                fontSize: 16,
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+                background: active ? '#fbbf24' : (d ? '#2a2a2a' : '#f5f5f5'),
+                color: active ? (d ? '#000' : '#fff') : (d ? '#666' : '#999'),
+                border: active ? '1px solid #f59e0b' : `1px solid ${d ? '#444' : '#e0e0e0'}`,
+              }}
+            >
+              ★
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 
   if (success) {
     return (
-      <div className="absolute bottom-0 left-0 right-0 z-20 bg-black/80 backdrop-blur-xl border-t border-white/10 p-6 animate-slide-up">
-        <div className="text-center">
-          <div className="text-2xl mb-2">✓</div>
-          <div className="text-white font-medium">Thanks for your contribution!</div>
-          <div className="text-gray-400 text-sm mt-1">Your feedback helps other nomads.</div>
+      <div
+        className="absolute bottom-0 left-0 right-0 z-20 animate-slide-up"
+        style={{ background: d ? '#1a1a1a' : '#fff', borderTop: `1px solid ${d ? '#333' : '#e8e8e8'}`, padding: 24 }}
+      >
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 24, marginBottom: 8, color: '#16a34a' }}>✓</div>
+          <div style={{ fontWeight: 500, color: d ? '#fff' : '#1a1a1a' }}>Thanks for your contribution!</div>
+          <div style={{ fontSize: 14, color: d ? '#9ca3af' : '#666', marginTop: 4 }}>Your feedback helps other nomads.</div>
         </div>
       </div>
     );
@@ -92,22 +118,40 @@ export default function CorrectionPanel({
 
   return (
     <>
-      <div className="absolute inset-0 z-10 bg-black/40" onClick={onClose} />
-      <div className="absolute bottom-0 left-0 right-0 z-20 bg-black/80 backdrop-blur-xl border-t border-white/10 rounded-t-2xl p-5 animate-slide-up max-h-[70vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4">
+      <div
+        className="absolute inset-0 z-10"
+        style={{ background: d ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.2)' }}
+        onClick={onClose}
+      />
+      <div
+        className="absolute bottom-0 left-0 right-0 z-20 rounded-t-2xl animate-slide-up"
+        style={{
+          background: d ? '#1a1a1a' : '#fff',
+          borderTop: `1px solid ${d ? '#333' : '#e8e8e8'}`,
+          padding: 24,
+          maxHeight: '70vh',
+          overflowY: 'auto',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <div>
-            <h3 className="text-white font-semibold text-base">Suggest a correction</h3>
-            <p className="text-gray-400 text-xs mt-0.5">{cafe.name}</p>
+            <h3 style={{ fontWeight: 700, fontSize: 18, color: d ? '#fff' : '#1a1a1a', margin: 0 }}>Suggest a correction</h3>
+            <p style={{ fontSize: 13, color: d ? '#9ca3af' : '#666', marginTop: 4 }}>{cafe.name}</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors text-xl leading-none">
+          <button
+            onClick={onClose}
+            style={{ fontSize: 22, lineHeight: 1, color: d ? '#9ca3af' : '#666', cursor: 'pointer', background: 'none', border: 'none', padding: '4px 8px' }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = d ? '#fff' : '#333'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = d ? '#9ca3af' : '#666'; }}
+          >
             ×
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           <div>
-            <label className="text-xs text-gray-400 mb-1.5 block">Laptop allowed?</label>
-            <div className="flex gap-2">
+            <label style={{ fontSize: 13, color: d ? '#9ca3af' : '#666', display: 'block', marginBottom: 8 }}>Laptop allowed?</label>
+            <div style={{ display: 'flex', gap: 8 }}>
               {laptopBtn('Yes', true)}
               {laptopBtn('No', false)}
               {laptopBtn('Not sure', null)}
@@ -118,20 +162,44 @@ export default function CorrectionPanel({
           {starRow('Seating rating', seatingRating, setSeatingRating)}
 
           <div>
-            <label className="text-xs text-gray-400 mb-1.5 block">Notes (optional)</label>
+            <label style={{ fontSize: 13, color: d ? '#9ca3af' : '#666', display: 'block', marginBottom: 8 }}>Notes (optional)</label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
-              className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-gray-500 outline-none focus:border-white/25 resize-none"
               placeholder="Anything else to share…"
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: 8,
+                background: d ? '#2a2a2a' : '#f5f5f5',
+                border: `1px solid ${d ? '#444' : '#e0e0e0'}`,
+                color: d ? '#e5e7eb' : '#333',
+                fontSize: 14,
+                outline: 'none',
+                resize: 'none',
+              }}
             />
           </div>
 
           <button
             onClick={submit}
             disabled={submitting}
-            className="w-full py-2.5 rounded-xl bg-white/15 text-white font-medium text-sm hover:bg-white/25 transition-all disabled:opacity-50 border border-white/10"
+            style={{
+              width: '100%',
+              padding: '12px 0',
+              borderRadius: 12,
+              background: '#1a73e8',
+              color: '#fff',
+              fontSize: 16,
+              fontWeight: 500,
+              border: 'none',
+              cursor: submitting ? 'not-allowed' : 'pointer',
+              opacity: submitting ? 0.5 : 1,
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => { if (!submitting) e.currentTarget.style.background = '#1557b0'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = '#1a73e8'; }}
           >
             {submitting ? 'Submitting…' : 'Submit'}
           </button>

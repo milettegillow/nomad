@@ -17,6 +17,7 @@ export interface Cafe {
   work_summary?: string;
   enrichment_reason?: string;
   key_review_quote?: string;
+  photo_url?: string;
 }
 
 export interface Submission {

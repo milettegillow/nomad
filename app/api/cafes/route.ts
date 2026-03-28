@@ -9,7 +9,7 @@ const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_CLAUDE_CALLS = 15;
 const MIN_REVIEWS_FOR_CLAUDE = 3;
-const ENRICHMENT_BATCH_SIZE = 5;
+const ENRICHMENT_BATCH_SIZE = 3;
 
 // --- Helpers ---
 
@@ -60,16 +60,19 @@ interface GooglePlace {
   rating?: number;
   reviews?: { text?: { text: string } }[];
   types?: string[];
+  photos?: { name: string }[];
 }
 
 async function googleNearbySearch(lat: number, lng: number): Promise<GooglePlace[]> {
+  const fieldMask = 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.reviews,places.types,places.photos';
+  console.log('[FieldMask]', fieldMask);
   try {
     const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': GOOGLE_PLACES_API_KEY,
-        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.reviews,places.types',
+        'X-Goog-FieldMask': fieldMask,
       },
       body: JSON.stringify({
         includedTypes: ['cafe'],
@@ -255,6 +258,11 @@ export async function POST(request: Request) {
           return;
         }
 
+        // Debug: log raw photo data from first 3 places
+        allPlaces.slice(0, 3).forEach(p => {
+          console.log('[Photo Debug]', p.displayName?.text, 'photos:', JSON.stringify(p.photos?.slice(0, 1)));
+        });
+
         // Check existing Supabase data
         const placeIds = allPlaces.map(p => p.id).filter(Boolean);
         const { data: existingCafes } = await supabase
@@ -308,10 +316,11 @@ export async function POST(request: Request) {
 
         console.log(`[Pipeline] Enriching ${toEnrich.length} cafés, skipping ${toSkip.length} (cached), ${noEnrich.length} with <${MIN_REVIEWS_FOR_CLAUDE} reviews (unconfirmed)`);
 
-        // Run Claude enrichment in batches
+        // Run Claude enrichment in batches of 3 with 2s delay between
         const claudeResults = new Map<string, Awaited<ReturnType<typeof enrichWithReviews>>>();
         for (let i = 0; i < toEnrich.length; i += ENRICHMENT_BATCH_SIZE) {
           const batch = toEnrich.slice(i, i + ENRICHMENT_BATCH_SIZE);
+          console.log(`[Pipeline] Enrichment batch ${Math.floor(i / ENRICHMENT_BATCH_SIZE) + 1}: ${batch.map(w => w.place.displayName?.text).join(', ')}`);
           const results = await Promise.all(
             batch.map(w => enrichWithReviews(
               w.place.displayName?.text || 'Unknown',
@@ -322,6 +331,10 @@ export async function POST(request: Request) {
           );
           for (let j = 0; j < batch.length; j++) {
             claudeResults.set(batch[j].place.id, results[j]);
+          }
+          // Rate limit: 2s delay between batches
+          if (i + ENRICHMENT_BATCH_SIZE < toEnrich.length) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
           }
         }
 
@@ -371,8 +384,14 @@ export async function POST(request: Request) {
             }
           }
 
+          const photoName = w.place.photos?.[0]?.name;
+          const photoUrl = photoName
+            ? `https://places.googleapis.com/v1/${photoName}/media?maxHeightPx=200&maxWidthPx=400&key=${GOOGLE_PLACES_API_KEY}`
+            : (w.existing?.photo_url as string | null) || null;
+
           console.log(`[Pipeline] ${placeName}: laptop=${laptop_allowed} wifi=${wifi_rating} confidence=${confidence}`);
           console.log(`[Pipeline] ${placeName} reason: ${reason}`);
+          console.log(`[Photo URL] ${placeName}: ${photoUrl || 'none'}`);
 
           return {
             name: placeName,
@@ -392,11 +411,16 @@ export async function POST(request: Request) {
             work_summary: null as string | null,
             enrichment_reason: reason,
             key_review_quote: keyQuote,
+            photo_url: photoUrl,
           };
         });
 
         // STEP 5: Save to Supabase
         send({ type: 'status', message: `💾 Saving ${enrichedCafes.length} cafés...` });
+
+        if (enrichedCafes.length > 0) {
+          console.log('[Upsert Example]', JSON.stringify(enrichedCafes[0], null, 2));
+        }
 
         const { error: upsertError } = await supabase
           .from('cafes')
