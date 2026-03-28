@@ -10,8 +10,6 @@ import CorrectionPanel from './CorrectionPanel';
 
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!;
 
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-
 function markerColor(cafe: Cafe): string {
   if (cafe.laptop_allowed === true) return '#22c55e';
   if (cafe.laptop_allowed === false) return '#ef4444';
@@ -73,14 +71,6 @@ function popupHTML(cafe: Cafe) {
   `;
 }
 
-function cafeNeedsEnrichment(cafe: Cafe): boolean {
-  if (cafe.id.startsWith('temp-')) return false;
-  if (cafe.confidence === 'verified') return false;
-  if (cafe.confidence === 'unconfirmed') return true;
-  const age = Date.now() - new Date(cafe.last_updated).getTime();
-  return age > SEVEN_DAYS_MS;
-}
-
 export default function Map() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
@@ -89,49 +79,46 @@ export default function Map() {
   const [correctionCafe, setCorrectionCafe] = useState<Cafe | null>(null);
   const [filters, setFilters] = useState({ laptop: false, wifi: false, seating: false });
   const [loadingCafes, setLoadingCafes] = useState(false);
-  const [enrichStatus, setEnrichStatus] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [firstSearchCity, setFirstSearchCity] = useState<string | null>(null);
   const [locationState, setLocationState] = useState<'pending' | 'locating' | 'granted' | 'failed'>('pending');
   const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const skipNextMoveEnd = useRef(false);
-  const enrichAbortRef = useRef<AbortController | null>(null);
+  const pipelineAbortRef = useRef<AbortController | null>(null);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 4000);
   }, []);
 
-  // Start SSE enrichment for cafes that need it
-  const startEnrichment = useCallback((cafesToEnrich: Cafe[]) => {
-    const needEnrichment = cafesToEnrich.filter(cafeNeedsEnrichment);
-    if (needEnrichment.length === 0) {
-      console.log('[Map] No cafes need enrichment');
-      return;
-    }
+  // Main pipeline — SSE stream from /api/cafes
+  const searchCity = useCallback(async (lat: number, lng: number, city?: string) => {
+    console.log('[Map] searchCity —', city || 'unknown', 'at', lat, lng);
+    setLoadingCafes(true);
+    setStatusMessage(`📍 Searching ${city || 'this area'}...`);
 
-    // Abort any previous enrichment stream
-    enrichAbortRef.current?.abort();
+    // Abort any previous pipeline
+    pipelineAbortRef.current?.abort();
     const abort = new AbortController();
-    enrichAbortRef.current = abort;
+    pipelineAbortRef.current = abort;
 
-    const cafeIds = needEnrichment.map(c => c.id);
-    console.log('[Map] SSE stream opening for', cafeIds.length, 'cafes');
+    try {
+      const res = await fetch('/api/cafes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat, lng, city }),
+        signal: abort.signal,
+      });
 
-    // Show status immediately before SSE connects
-    setEnrichStatus(`🔍 Enriching ${cafeIds.length} café${cafeIds.length > 1 ? 's' : ''}...`);
-
-    fetch('/api/enrich', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cafeIds }),
-      signal: abort.signal,
-    }).then(async (res) => {
       if (!res.ok || !res.body) {
-        console.error('[Map] Enrich SSE error:', res.status);
+        console.error('[Map] Pipeline SSE error:', res.status);
+        showToast('Search failed — check console');
+        setLoadingCafes(false);
+        setStatusMessage(null);
         return;
       }
 
-      console.log('[Map] SSE stream connected');
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -149,114 +136,77 @@ export default function Map() {
           try {
             const event = JSON.parse(line.slice(6));
 
-            if (event.type === 'status') {
-              console.log('[Map] SSE status:', event.message);
-              setEnrichStatus(event.message);
-            } else if (event.type === 'cafe_updated') {
-              const updatedCafe = event.cafe as Cafe;
-              console.log('[Map] SSE cafe_updated:', updatedCafe.name, '— confidence:', updatedCafe.confidence);
-              setCafes(prev => prev.map(c => c.id === updatedCafe.id ? updatedCafe : c));
-              // Trigger pulse on the marker
-              const entry = markersRef.current.get(updatedCafe.id);
-              if (entry) {
-                entry.el.classList.add('marker-pulse');
-                setTimeout(() => entry.el.classList.remove('marker-pulse'), 1500);
-              }
+            if (event.type === 'first_search') {
+              console.log('[Map] First search for city:', event.city);
+              setFirstSearchCity(event.city as string);
+            } else if (event.type === 'status') {
+              console.log('[Map] Status:', event.message);
+              setStatusMessage(event.message);
+            } else if (event.type === 'cafes') {
+              console.log('[Map] Received', event.cafes.length, 'cafés', event.cached ? '(cached)' : '(fresh)');
+              setFirstSearchCity(null); // Dismiss first-search overlay
+              setCafes(event.cafes as Cafe[]);
+            } else if (event.type === 'error') {
+              console.error('[Map] Pipeline error:', event.message);
+              showToast(event.message || 'Something went wrong');
             } else if (event.type === 'complete') {
-              console.log('[Map] SSE stream complete');
-              setEnrichStatus('✓ All done');
-              setTimeout(() => setEnrichStatus(null), 2000);
+              console.log('[Map] Pipeline complete');
+              setTimeout(() => setStatusMessage(null), 2000);
             }
           } catch {
             // Skip malformed events
           }
         }
       }
-    }).catch((e) => {
-      if (e.name !== 'AbortError') {
-        console.error('[Map] Enrich stream error:', e);
-      }
-    });
-  }, []);
-
-  const fetchCafes = useCallback(async (lat: number, lng: number) => {
-    console.log('[Map] fetchCafes called — lat:', lat, 'lng:', lng);
-    setLoadingCafes(true);
-    // Abort any ongoing enrichment when fetching new area
-    enrichAbortRef.current?.abort();
-    setEnrichStatus(null);
-
-    try {
-      const res = await fetch(`/api/cafes?lat=${lat}&lng=${lng}`);
-      const data = await res.json();
-
-      if (!res.ok) {
-        showToast(data.details || data.error || 'API error — check console');
-        return;
-      }
-
-      if (Array.isArray(data)) {
-        console.log('[Map] fetchCafes returned', data.length, 'cafes');
-        setCafes(data);
-        if (data.length === 0) {
-          showToast('No cafés found in this area');
-        } else {
-          // Start enrichment for unenriched cafes
-          console.log('[Map] Starting enrichment after fetchCafes');
-          startEnrichment(data);
-        }
-      }
     } catch (e) {
-      console.error('[Map] Fetch error:', e);
-      showToast('Network error — check console');
+      if ((e as Error).name !== 'AbortError') {
+        console.error('[Map] Pipeline fetch error:', e);
+        showToast('Network error — check console');
+      }
     } finally {
       setLoadingCafes(false);
     }
-  }, [showToast, startEnrichment]);
+  }, [showToast]);
 
-  // Keep a ref to fetchCafes so the map init effect ([] deps) can always call the latest version
-  const fetchCafesRef = useRef(fetchCafes);
-  useEffect(() => { fetchCafesRef.current = fetchCafes; }, [fetchCafes]);
+  // Ref so map init effect can call the latest version
+  const searchCityRef = useRef(searchCity);
+  useEffect(() => { searchCityRef.current = searchCity; }, [searchCity]);
 
-  const flyToAndFetch = useCallback((lng: number, lat: number, zoom = 14) => {
+  const flyToAndSearch = useCallback((lng: number, lat: number, city?: string) => {
     if (!map.current) return;
-    console.log('[Map] flyToAndFetch — lng:', lng, 'lat:', lat);
     skipNextMoveEnd.current = true;
     setOverlayDismissed(true);
-    map.current.flyTo({ center: [lng, lat], zoom, duration: 1500 });
-    fetchCafesRef.current(lat, lng);
+    map.current.flyTo({ center: [lng, lat], zoom: 14, duration: 1500 });
+    searchCityRef.current(lat, lng, city);
   }, []);
 
+  // Geolocation via Google API
   const requestLocation = useCallback(async () => {
     setLocationState('locating');
-    console.log('[Map] Requesting geolocation via /api/geolocate...');
     try {
       const res = await fetch('/api/geolocate', { method: 'POST' });
       const data = await res.json();
       if (!res.ok || typeof data.lat !== 'number' || typeof data.lng !== 'number') {
-        console.error('[Map] Geolocate API error:', data);
         setLocationState('failed');
         return;
       }
-      console.log('[Map] Geolocation success — lat:', data.lat, 'lng:', data.lng);
       setLocationState('granted');
       setOverlayDismissed(true);
       if (map.current) {
         skipNextMoveEnd.current = true;
         map.current.flyTo({ center: [data.lng, data.lat], zoom: 14, duration: 1500 });
       }
-      fetchCafesRef.current(data.lat, data.lng);
-    } catch (e) {
-      console.error('[Map] Geolocate fetch error:', e);
+      // No city name from geolocate — the server will reverse geocode
+      searchCityRef.current(data.lat, data.lng);
+    } catch {
       setLocationState('failed');
     }
   }, []);
 
-  // Initialize map — empty deps, runs once
+  // Initialize map
   useEffect(() => {
     if (map.current || !mapContainer.current) return;
 
-    console.log('[Map] Initializing Mapbox map');
     const m = new mapboxgl.Map({
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/dark-v11',
@@ -269,18 +219,8 @@ export default function Map() {
     m.touchZoomRotate.disableRotation();
     m.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
 
-    m.on('moveend', () => {
-      if (skipNextMoveEnd.current) {
-        skipNextMoveEnd.current = false;
-        return;
-      }
-      if (m.getZoom() < 10) return;
-      const center = m.getCenter();
-      fetchCafesRef.current(center.lat, center.lng);
-    });
-
+    // No moveend auto-fetch — the new pipeline is city-based, not pan-based
     m.on('load', () => {
-      console.log('[Map] Map loaded — requesting location');
       requestLocation();
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -299,11 +239,10 @@ export default function Map() {
     return () => document.removeEventListener('click', handler);
   }, [cafes]);
 
-  // Update markers — rebuild all when cafes or filters change
+  // Update markers
   useEffect(() => {
     if (!map.current) return;
 
-    // Remove old markers
     markersRef.current.forEach(({ marker }) => marker.remove());
     markersRef.current.clear();
 
@@ -341,8 +280,8 @@ export default function Map() {
     });
   }, [cafes, filters]);
 
-  const handleSearch = (lng: number, lat: number) => {
-    flyToAndFetch(lng, lat);
+  const handleSearch = (lng: number, lat: number, cityName: string) => {
+    flyToAndSearch(lng, lat, cityName);
   };
 
   const handleMyLocation = async () => {
@@ -359,7 +298,7 @@ export default function Map() {
         skipNextMoveEnd.current = true;
         map.current.flyTo({ center: [data.lng, data.lat], zoom: 14, duration: 1500 });
       }
-      fetchCafesRef.current(data.lat, data.lng);
+      searchCityRef.current(data.lat, data.lng);
     } catch {
       showToast('Location unavailable — try searching instead');
     }
@@ -389,21 +328,39 @@ export default function Map() {
         📍 My location
       </button>
 
-      {/* Enrichment status bar — below search bar, top center */}
-      {enrichStatus && (
+      {/* First search overlay — prominent card */}
+      {firstSearchCity && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+          <div className="text-center px-8 py-10 rounded-2xl bg-black/60 backdrop-blur-xl border border-white/10 shadow-2xl pointer-events-auto animate-fade-in max-w-md">
+            <div className="text-4xl mb-4">🎉</div>
+            <p className="text-white font-semibold text-lg mb-2">
+              You&apos;re the first person to search {firstSearchCity} on Nomad!
+            </p>
+            <p className="text-gray-400 text-sm leading-relaxed">
+              Sit tight while we find the best work cafés — this takes a minute but you&apos;re making it faster for everyone who comes after you ☕
+            </p>
+            {statusMessage && (
+              <p className="text-gray-300 text-xs mt-4 animate-fade-in">{statusMessage}</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Status bar — top center (hidden when first-search overlay is showing) */}
+      {statusMessage && !firstSearchCity && (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 px-5 py-2.5 rounded-xl bg-black/70 backdrop-blur-xl border border-white/10 text-sm text-gray-200 shadow-lg animate-fade-in whitespace-nowrap">
-          {enrichStatus}
+          {statusMessage}
         </div>
       )}
 
       {/* Location status toast — only while locating */}
-      {locationState === 'locating' && !enrichStatus && (
+      {locationState === 'locating' && !statusMessage && (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 px-5 py-3 rounded-xl bg-black/70 backdrop-blur-xl border border-white/10 text-sm text-gray-300 shadow-lg animate-fade-in">
           📍 Finding your location...
         </div>
       )}
 
-      {/* Search prompt overlay — shown when geolocation failed/denied */}
+      {/* Search prompt overlay */}
       {showSearchOverlay && (
         <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
           <div className="text-center px-6 py-8 rounded-2xl bg-black/50 backdrop-blur-xl border border-white/10 shadow-2xl pointer-events-auto animate-fade-in">
@@ -430,9 +387,10 @@ export default function Map() {
           onClose={() => setCorrectionCafe(null)}
           onSubmitted={() => {
             setCorrectionCafe(null);
+            // Re-search current area
             if (map.current) {
               const center = map.current.getCenter();
-              fetchCafes(center.lat, center.lng);
+              searchCityRef.current(center.lat, center.lng);
             }
           }}
         />

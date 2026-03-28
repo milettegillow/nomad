@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from 'react';
 interface SearchResult {
   id: string;
   place_name: string;
+  text: string; // city/place name only
   center: [number, number];
 }
 
@@ -13,7 +14,7 @@ export default function SearchBox({
   onTyping,
   loading,
 }: {
-  onSelect: (lng: number, lat: number) => void;
+  onSelect: (lng: number, lat: number, cityName: string) => void;
   onTyping?: () => void;
   loading?: boolean;
 }) {
@@ -50,9 +51,10 @@ export default function SearchBox({
       const data = await res.json();
       if (data.features) {
         setResults(
-          data.features.map((f: { id: string; place_name: string; center: [number, number] }) => ({
+          data.features.map((f: { id: string; place_name: string; text: string; center: [number, number] }) => ({
             id: f.id,
             place_name: f.place_name,
+            text: f.text,
             center: f.center,
           }))
         );
@@ -65,7 +67,7 @@ export default function SearchBox({
     setQuery(result.place_name);
     setOpen(false);
     setResults([]);
-    onSelect(result.center[0], result.center[1]);
+    onSelect(result.center[0], result.center[1], result.text);
   };
 
   return (
