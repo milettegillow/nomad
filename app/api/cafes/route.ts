@@ -384,14 +384,11 @@ export async function POST(request: Request) {
             }
           }
 
-          const photoName = w.place.photos?.[0]?.name;
-          const photoUrl = photoName
-            ? `https://places.googleapis.com/v1/${photoName}/media?maxHeightPx=200&maxWidthPx=400&key=${GOOGLE_PLACES_API_KEY}`
-            : (w.existing?.photo_url as string | null) || null;
+          const photoName = w.place.photos?.[0]?.name || (w.existing?.photo_name as string | null) || null;
 
           console.log(`[Pipeline] ${placeName}: laptop=${laptop_allowed} wifi=${wifi_rating} confidence=${confidence}`);
           console.log(`[Pipeline] ${placeName} reason: ${reason}`);
-          console.log(`[Photo URL] ${placeName}: ${photoUrl || 'none'}`);
+          console.log(`[Photo] ${placeName}: ${photoName || 'none'}`);
 
           return {
             name: placeName,
@@ -411,7 +408,8 @@ export async function POST(request: Request) {
             work_summary: null as string | null,
             enrichment_reason: reason,
             key_review_quote: keyQuote,
-            photo_url: photoUrl,
+            photo_url: null as string | null,
+            photo_name: photoName,
           };
         });
 

@@ -1,0 +1,1 @@
+ALTER TABLE cafes ADD COLUMN IF NOT EXISTS photo_name text;

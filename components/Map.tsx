@@ -78,7 +78,7 @@ function popupHTML(cafe: Cafe, dark: boolean) {
 
   return `
     <div style="font-family:system-ui;color:${text};min-width:240px;background:${bg};border:${popupBorder};border-radius:12px;padding:16px">
-      ${cafe.photo_url ? `<div style="margin:-16px -16px 12px -16px"><img src="${cafe.photo_url}" alt="" style="width:100%;height:140px;object-fit:cover;border-radius:12px 12px 0 0;display:block" /></div>` : ''}
+      ${cafe.photo_name ? `<div style="margin:-16px -16px 12px -16px"><img src="/api/photo?name=${encodeURIComponent(cafe.photo_name)}" alt="" style="width:100%;height:140px;object-fit:cover;border-radius:12px 12px 0 0;display:block" /></div>` : ''}
       <div style="font-weight:700;font-size:16px;margin-bottom:6px;color:${nameColor}">${cafe.name}</div>
       ${cafe.address ? `<div style="font-size:14px;color:${addrColor};margin-bottom:12px;line-height:1.4">${cafe.address}</div>` : ''}
       ${cafe.google_rating != null ? `<div style="font-size:26px;margin-bottom:10px;line-height:1">⭐ ${cafe.google_rating.toFixed(1)}</div>` : ''}
@@ -115,6 +115,7 @@ export default function Map() {
   const [darkMode, setDarkMode] = useState(false);
   const skipNextMoveEnd = useRef(false);
   const pipelineAbortRef = useRef<AbortController | null>(null);
+  const activePopupCafeIdRef = useRef<string | null>(null);
 
   // Load dark mode preference
   useEffect(() => {
@@ -124,26 +125,42 @@ export default function Map() {
 
   // Toggle dark mode
   const toggleDarkMode = useCallback(() => {
+    // Save currently open popup before style change destroys markers
+    let openCafeId: string | null = null;
+    markersRef.current.forEach(({ marker, cafe }) => {
+      if (marker.getPopup()?.isOpen()) openCafeId = cafe.id;
+    });
+    activePopupCafeIdRef.current = openCafeId;
+
     setDarkMode(prev => {
       const next = !prev;
       localStorage.setItem('nomad-dark-mode', String(next));
       if (map.current) {
         map.current.setStyle(next ? DARK_STYLE : LIGHT_STYLE);
       }
-      // Update popup CSS class on body
       document.body.classList.toggle('nomad-dark', next);
       return next;
     });
   }, []);
 
-  // Re-render markers after style change
+  // Re-render markers after style change, then re-open saved popup
   useEffect(() => {
     if (!map.current) return;
     const m = map.current;
     const onStyleLoad = () => {
-      // Markers are re-added by the cafes/filters effect
-      // Force re-render by setting cafes to a new array reference
+      // Force marker re-render
       setCafes(prev => [...prev]);
+      // Re-open popup after markers are re-added (next tick)
+      setTimeout(() => {
+        const cafeId = activePopupCafeIdRef.current;
+        if (cafeId) {
+          const entry = markersRef.current.get(cafeId);
+          if (entry && !entry.marker.getPopup()?.isOpen()) {
+            entry.marker.togglePopup();
+          }
+          activePopupCafeIdRef.current = null;
+        }
+      }, 100);
     };
     m.on('style.load', onStyleLoad);
     return () => { m.off('style.load', onStyleLoad); };
