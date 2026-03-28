@@ -10,6 +10,8 @@ import CorrectionPanel from './CorrectionPanel';
 
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!;
 
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
 function markerColor(cafe: Cafe): string {
   if (cafe.laptop_allowed === true) return '#22c55e';
   if (cafe.laptop_allowed === false) return '#ef4444';
@@ -19,17 +21,34 @@ function markerColor(cafe: Cafe): string {
 function confidenceBadge(confidence: string) {
   switch (confidence) {
     case 'verified':
-      return '<span style="color:#22c55e;font-size:11px">✓ Verified</span>';
+      return '<span style="color:#22c55e;font-size:11px">✓ Verified</span> <span style="color:#6b7280;font-size:10px">via community</span>';
     case 'inferred':
-      return '<span style="color:#eab308;font-size:11px">~ Likely</span>';
+      return '<span style="color:#eab308;font-size:11px">~ Likely</span> <span style="color:#6b7280;font-size:10px">via reviews</span>';
     default:
       return '<span style="color:#9ca3af;font-size:11px">? Unconfirmed</span>';
   }
 }
 
 function dots(rating: number | null) {
-  if (!rating) return '<span style="color:#6b7280">—</span>';
-  return '●'.repeat(rating) + '○'.repeat(5 - rating);
+  if (rating == null) return '<span style="color:#6b7280">?</span>';
+  return '<span style="letter-spacing:2px">' + '●'.repeat(rating) + '○'.repeat(5 - rating) + '</span>';
+}
+
+function sourceLabel(confidence: string) {
+  if (confidence === 'verified') return '<span style="color:#6b7280;font-size:10px;margin-left:4px">via community</span>';
+  if (confidence === 'inferred') return '<span style="color:#6b7280;font-size:10px;margin-left:4px">via reviews</span>';
+  return '';
+}
+
+function laptopLabel(cafe: Cafe) {
+  if (cafe.laptop_allowed === true) return `<span style="color:#22c55e">✓ Allowed</span>${sourceLabel(cafe.confidence)}`;
+  if (cafe.laptop_allowed === false) return `<span style="color:#ef4444">✗ Not allowed</span>${sourceLabel(cafe.confidence)}`;
+  return '<span style="color:#9ca3af">? Unknown</span>';
+}
+
+function wifiLabel(cafe: Cafe) {
+  if (cafe.wifi_rating != null) return `<span style="color:#22c55e">✓ Available</span> <span style="color:#9ca3af;font-size:11px">(${cafe.wifi_rating}/5)</span>${sourceLabel(cafe.confidence)}`;
+  return '<span style="color:#9ca3af">? Unknown</span>';
 }
 
 function popupHTML(cafe: Cafe) {
@@ -37,18 +56,12 @@ function popupHTML(cafe: Cafe) {
     <div style="font-family:system-ui;color:#e5e7eb;min-width:200px">
       <div style="font-weight:600;font-size:15px;margin-bottom:6px;color:#fff">${cafe.name}</div>
       ${cafe.address ? `<div style="font-size:12px;color:#9ca3af;margin-bottom:8px">${cafe.address}</div>` : ''}
-      ${cafe.google_rating != null ? `<div style="font-size:18px;margin-bottom:2px">⭐ ${cafe.google_rating.toFixed(1)}</div>` : ''}
-      ${cafe.foursquare_rating != null ? `<div style="font-size:12px;color:#9ca3af;margin-bottom:8px">Foursquare: ${cafe.foursquare_rating.toFixed(1)}/5</div>` : ''}
-      <div style="font-size:13px;margin-bottom:4px">
-        Laptop: ${cafe.laptop_allowed === true ? '<span style="color:#22c55e">✓ Yes</span>' : cafe.laptop_allowed === false ? '<span style="color:#ef4444">✗ No</span>' : '<span style="color:#9ca3af">? Unknown</span>'}
-      </div>
-      <div style="font-size:13px;margin-bottom:4px">
-        WiFi: ${cafe.wifi_rating ? '<span style="color:#22c55e">✓ Yes</span>' : '<span style="color:#9ca3af">? Unknown</span>'}
-      </div>
-      <div style="font-size:13px;margin-bottom:4px">
-        Seating: <span style="letter-spacing:2px">${dots(cafe.seating_rating)}</span>
-      </div>
-      <div style="margin-bottom:8px">${confidenceBadge(cafe.confidence)}</div>
+      ${cafe.google_rating != null ? `<div style="font-size:18px;margin-bottom:6px">⭐ ${cafe.google_rating.toFixed(1)}</div>` : ''}
+      <div style="font-size:13px;margin-bottom:4px">Laptop: ${laptopLabel(cafe)}</div>
+      <div style="font-size:13px;margin-bottom:4px">WiFi: ${wifiLabel(cafe)}</div>
+      <div style="font-size:13px;margin-bottom:4px">Seating: ${dots(cafe.seating_rating)}${cafe.seating_rating != null ? sourceLabel(cafe.confidence) : ''}</div>
+      <div style="margin-bottom:${cafe.work_summary ? '4' : '8'}px">${confidenceBadge(cafe.confidence)}</div>
+      ${cafe.work_summary ? `<div style="font-size:12px;color:#9ca3af;font-style:italic;margin-bottom:8px">${cafe.work_summary}</div>` : ''}
       <button
         data-cafe-id="${cafe.id}"
         class="suggest-correction-btn"
@@ -60,52 +73,138 @@ function popupHTML(cafe: Cafe) {
   `;
 }
 
+function cafeNeedsEnrichment(cafe: Cafe): boolean {
+  if (cafe.id.startsWith('temp-')) return false;
+  if (cafe.confidence === 'verified') return false;
+  if (cafe.confidence === 'unconfirmed') return true;
+  const age = Date.now() - new Date(cafe.last_updated).getTime();
+  return age > SEVEN_DAYS_MS;
+}
+
 export default function Map() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
-  const markersRef = useRef<{ marker: mapboxgl.Marker; cafe: Cafe }[]>([]);
+  const markersRef = useRef<globalThis.Map<string, { marker: mapboxgl.Marker; el: HTMLDivElement; cafe: Cafe }>>(new globalThis.Map());
   const [cafes, setCafes] = useState<Cafe[]>([]);
   const [correctionCafe, setCorrectionCafe] = useState<Cafe | null>(null);
   const [filters, setFilters] = useState({ laptop: false, wifi: false, seating: false });
   const [loadingCafes, setLoadingCafes] = useState(false);
-  const [locationState, setLocationState] = useState<'pending' | 'granted' | 'denied' | 'prompt'>('pending');
+  const [enrichStatus, setEnrichStatus] = useState<string | null>(null);
+  const [locationState, setLocationState] = useState<'pending' | 'locating' | 'granted' | 'failed'>('pending');
   const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const userCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
-  // Guard to prevent moveend from re-fetching during a flyTo we already handle
   const skipNextMoveEnd = useRef(false);
-  // Guard to prevent double geolocation request from React strict mode
-  const geoRequested = useRef(false);
+  const enrichAbortRef = useRef<AbortController | null>(null);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 4000);
   }, []);
 
+  // Start SSE enrichment for cafes that need it
+  const startEnrichment = useCallback((cafesToEnrich: Cafe[]) => {
+    const needEnrichment = cafesToEnrich.filter(cafeNeedsEnrichment);
+    if (needEnrichment.length === 0) {
+      console.log('[Map] No cafes need enrichment');
+      return;
+    }
+
+    // Abort any previous enrichment stream
+    enrichAbortRef.current?.abort();
+    const abort = new AbortController();
+    enrichAbortRef.current = abort;
+
+    const cafeIds = needEnrichment.map(c => c.id);
+    console.log('[Map] SSE stream opening for', cafeIds.length, 'cafes');
+
+    // Show status immediately before SSE connects
+    setEnrichStatus(`🔍 Enriching ${cafeIds.length} café${cafeIds.length > 1 ? 's' : ''}...`);
+
+    fetch('/api/enrich', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cafeIds }),
+      signal: abort.signal,
+    }).then(async (res) => {
+      if (!res.ok || !res.body) {
+        console.error('[Map] Enrich SSE error:', res.status);
+        return;
+      }
+
+      console.log('[Map] SSE stream connected');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+
+            if (event.type === 'status') {
+              console.log('[Map] SSE status:', event.message);
+              setEnrichStatus(event.message);
+            } else if (event.type === 'cafe_updated') {
+              const updatedCafe = event.cafe as Cafe;
+              console.log('[Map] SSE cafe_updated:', updatedCafe.name, '— confidence:', updatedCafe.confidence);
+              setCafes(prev => prev.map(c => c.id === updatedCafe.id ? updatedCafe : c));
+              // Trigger pulse on the marker
+              const entry = markersRef.current.get(updatedCafe.id);
+              if (entry) {
+                entry.el.classList.add('marker-pulse');
+                setTimeout(() => entry.el.classList.remove('marker-pulse'), 1500);
+              }
+            } else if (event.type === 'complete') {
+              console.log('[Map] SSE stream complete');
+              setEnrichStatus('✓ All done');
+              setTimeout(() => setEnrichStatus(null), 2000);
+            }
+          } catch {
+            // Skip malformed events
+          }
+        }
+      }
+    }).catch((e) => {
+      if (e.name !== 'AbortError') {
+        console.error('[Map] Enrich stream error:', e);
+      }
+    });
+  }, []);
+
   const fetchCafes = useCallback(async (lat: number, lng: number) => {
-    console.log('[Map] fetchCafes called with lat:', lat, 'lng:', lng);
+    console.log('[Map] fetchCafes called — lat:', lat, 'lng:', lng);
     setLoadingCafes(true);
+    // Abort any ongoing enrichment when fetching new area
+    enrichAbortRef.current?.abort();
+    setEnrichStatus(null);
+
     try {
-      const url = `/api/cafes?lat=${lat}&lng=${lng}`;
-      console.log('[Map] Fetching:', url);
-      const res = await fetch(url);
+      const res = await fetch(`/api/cafes?lat=${lat}&lng=${lng}`);
       const data = await res.json();
-      console.log('[Map] API response status:', res.status, 'data:', Array.isArray(data) ? `${data.length} cafes` : data);
 
       if (!res.ok) {
-        console.error('[Map] API error:', data);
         showToast(data.details || data.error || 'API error — check console');
         return;
       }
 
       if (Array.isArray(data)) {
+        console.log('[Map] fetchCafes returned', data.length, 'cafes');
         setCafes(data);
         if (data.length === 0) {
           showToast('No cafés found in this area');
+        } else {
+          // Start enrichment for unenriched cafes
+          console.log('[Map] Starting enrichment after fetchCafes');
+          startEnrichment(data);
         }
-      } else {
-        console.error('[Map] Unexpected response shape:', data);
-        showToast('Unexpected API response — check console');
       }
     } catch (e) {
       console.error('[Map] Fetch error:', e);
@@ -113,7 +212,11 @@ export default function Map() {
     } finally {
       setLoadingCafes(false);
     }
-  }, [showToast]);
+  }, [showToast, startEnrichment]);
+
+  // Keep a ref to fetchCafes so the map init effect ([] deps) can always call the latest version
+  const fetchCafesRef = useRef(fetchCafes);
+  useEffect(() => { fetchCafesRef.current = fetchCafes; }, [fetchCafes]);
 
   const flyToAndFetch = useCallback((lng: number, lat: number, zoom = 14) => {
     if (!map.current) return;
@@ -121,10 +224,35 @@ export default function Map() {
     skipNextMoveEnd.current = true;
     setOverlayDismissed(true);
     map.current.flyTo({ center: [lng, lat], zoom, duration: 1500 });
-    fetchCafes(lat, lng);
-  }, [fetchCafes]);
+    fetchCafesRef.current(lat, lng);
+  }, []);
 
-  // Initialize map
+  const requestLocation = useCallback(async () => {
+    setLocationState('locating');
+    console.log('[Map] Requesting geolocation via /api/geolocate...');
+    try {
+      const res = await fetch('/api/geolocate', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || typeof data.lat !== 'number' || typeof data.lng !== 'number') {
+        console.error('[Map] Geolocate API error:', data);
+        setLocationState('failed');
+        return;
+      }
+      console.log('[Map] Geolocation success — lat:', data.lat, 'lng:', data.lng);
+      setLocationState('granted');
+      setOverlayDismissed(true);
+      if (map.current) {
+        skipNextMoveEnd.current = true;
+        map.current.flyTo({ center: [data.lng, data.lat], zoom: 14, duration: 1500 });
+      }
+      fetchCafesRef.current(data.lat, data.lng);
+    } catch (e) {
+      console.error('[Map] Geolocate fetch error:', e);
+      setLocationState('failed');
+    }
+  }, []);
+
+  // Initialize map — empty deps, runs once
   useEffect(() => {
     if (map.current || !mapContainer.current) return;
 
@@ -148,83 +276,17 @@ export default function Map() {
       }
       if (m.getZoom() < 10) return;
       const center = m.getCenter();
-      console.log('[Map] moveend — fetching cafes at:', center.lat, center.lng);
-      fetchCafes(center.lat, center.lng);
+      fetchCafesRef.current(center.lat, center.lng);
     });
 
-    // Wait for the map to fully load before requesting geolocation
     m.on('load', () => {
-      console.log('[Map] Map loaded, requesting geolocation...');
-      requestGeolocation(m);
+      console.log('[Map] Map loaded — requesting location');
+      requestLocation();
     });
-  }, [fetchCafes]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Separate geolocation function that can be called safely
-  // Uses a ref guard so React strict mode double-mount doesn't cause issues
-  function requestGeolocation(m: mapboxgl.Map) {
-    if (geoRequested.current) {
-      console.log('[Map] Geolocation already requested, skipping');
-      return;
-    }
-    geoRequested.current = true;
-
-    if (!navigator.geolocation) {
-      console.log('[Map] navigator.geolocation not available');
-      setLocationState('denied');
-      return;
-    }
-
-    setLocationState('prompt');
-    console.log('[Map] Calling navigator.geolocation.getCurrentPosition()');
-
-    const flyToLocation = (latitude: number, longitude: number) => {
-      userCoordsRef.current = { lat: latitude, lng: longitude };
-      setLocationState('granted');
-      setOverlayDismissed(true);
-      skipNextMoveEnd.current = true;
-      console.log('[Map] Flying to location and fetching cafes');
-      m.flyTo({ center: [longitude, latitude], zoom: 14, duration: 2000 });
-      fetchCafes(latitude, longitude);
-    };
-
-    const fallbackToIP = async () => {
-      console.log('[Map] Falling back to IP-based geolocation');
-      try {
-        const res = await fetch('https://ipapi.co/json/');
-        const data = await res.json();
-        if (data.latitude && data.longitude) {
-          console.log('[Map] IP geolocation — lat:', data.latitude, 'lng:', data.longitude);
-          flyToLocation(data.latitude, data.longitude);
-        } else {
-          console.error('[Map] IP geolocation returned no coords:', data);
-          setLocationState('denied');
-        }
-      } catch (e) {
-        console.error('[Map] IP geolocation failed:', e);
-        setLocationState('denied');
-      }
-    };
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        console.log('[Map] Geolocation SUCCESS — lat:', pos.coords.latitude, 'lng:', pos.coords.longitude);
-        flyToLocation(pos.coords.latitude, pos.coords.longitude);
-      },
-      (err) => {
-        console.error('[Map] Geolocation ERROR — code:', err.code, 'message:', err.message);
-        if (err.code === 1) {
-          // PERMISSION_DENIED — user explicitly said no
-          setLocationState('denied');
-        } else {
-          // POSITION_UNAVAILABLE (2) or TIMEOUT (3) — try IP fallback
-          fallbackToIP();
-        }
-      },
-      { enableHighAccuracy: false, timeout: 30000, maximumAge: 60000 }
-    );
-  }
-
-  // Handle correction button clicks via event delegation
+  // Handle correction button clicks
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       const btn = (e.target as HTMLElement).closest('.suggest-correction-btn') as HTMLElement | null;
@@ -237,12 +299,13 @@ export default function Map() {
     return () => document.removeEventListener('click', handler);
   }, [cafes]);
 
-  // Update markers
+  // Update markers — rebuild all when cafes or filters change
   useEffect(() => {
     if (!map.current) return;
 
+    // Remove old markers
     markersRef.current.forEach(({ marker }) => marker.remove());
-    markersRef.current = [];
+    markersRef.current.clear();
 
     const filtered = cafes.filter(cafe => {
       if (filters.laptop && cafe.laptop_allowed !== true) return false;
@@ -253,6 +316,7 @@ export default function Map() {
 
     filtered.forEach(cafe => {
       const el = document.createElement('div');
+      el.className = 'cafe-marker';
       el.style.width = '14px';
       el.style.height = '14px';
       el.style.borderRadius = '50%';
@@ -260,20 +324,20 @@ export default function Map() {
       el.style.border = '2px solid rgba(0,0,0,0.3)';
       el.style.cursor = 'pointer';
       el.style.boxShadow = `0 0 6px ${markerColor(cafe)}80`;
+      el.style.transition = 'background-color 0.3s, box-shadow 0.3s';
 
       const popup = new mapboxgl.Popup({
         offset: 12,
         closeButton: true,
         maxWidth: '280px',
-      })
-        .setHTML(popupHTML(cafe));
+      }).setHTML(popupHTML(cafe));
 
       const marker = new mapboxgl.Marker(el)
         .setLngLat([cafe.lng, cafe.lat])
         .setPopup(popup)
         .addTo(map.current!);
 
-      markersRef.current.push({ marker, cafe });
+      markersRef.current.set(cafe.id, { marker, el, cafe });
     });
   }, [cafes, filters]);
 
@@ -281,25 +345,27 @@ export default function Map() {
     flyToAndFetch(lng, lat);
   };
 
-  const handleMyLocation = () => {
-    if (userCoordsRef.current) {
-      flyToAndFetch(userCoordsRef.current.lng, userCoordsRef.current.lat);
-    } else {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const { latitude, longitude } = pos.coords;
-          userCoordsRef.current = { lat: latitude, lng: longitude };
-          setLocationState('granted');
-          flyToAndFetch(longitude, latitude);
-        },
-        () => setLocationState('denied'),
-        { enableHighAccuracy: false, timeout: 10000 }
-      );
+  const handleMyLocation = async () => {
+    try {
+      const res = await fetch('/api/geolocate', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || typeof data.lat !== 'number' || typeof data.lng !== 'number') {
+        showToast('Location unavailable — try searching instead');
+        return;
+      }
+      setLocationState('granted');
+      setOverlayDismissed(true);
+      if (map.current) {
+        skipNextMoveEnd.current = true;
+        map.current.flyTo({ center: [data.lng, data.lat], zoom: 14, duration: 1500 });
+      }
+      fetchCafesRef.current(data.lat, data.lng);
+    } catch {
+      showToast('Location unavailable — try searching instead');
     }
   };
 
-  // Show the overlay only when geolocation is denied, no cafes loaded, and not yet dismissed
-  const showOverlay = locationState === 'denied' && cafes.length === 0 && !overlayDismissed;
+  const showSearchOverlay = locationState === 'failed' && cafes.length === 0 && !overlayDismissed;
 
   return (
     <div className="relative w-full h-full">
@@ -323,20 +389,25 @@ export default function Map() {
         📍 My location
       </button>
 
-      {/* Location prompt toast */}
-      {locationState === 'prompt' && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 px-5 py-3 rounded-xl bg-black/70 backdrop-blur-xl border border-white/10 text-sm text-gray-300 shadow-lg animate-fade-in">
-          Allow location access to find cafés near you
+      {/* Enrichment status bar — below search bar, top center */}
+      {enrichStatus && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 px-5 py-2.5 rounded-xl bg-black/70 backdrop-blur-xl border border-white/10 text-sm text-gray-200 shadow-lg animate-fade-in whitespace-nowrap">
+          {enrichStatus}
         </div>
       )}
 
-      {/* Denied — search prompt overlay */}
-      {showOverlay && (
+      {/* Location status toast — only while locating */}
+      {locationState === 'locating' && !enrichStatus && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 px-5 py-3 rounded-xl bg-black/70 backdrop-blur-xl border border-white/10 text-sm text-gray-300 shadow-lg animate-fade-in">
+          📍 Finding your location...
+        </div>
+      )}
+
+      {/* Search prompt overlay — shown when geolocation failed/denied */}
+      {showSearchOverlay && (
         <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
           <div className="text-center px-6 py-8 rounded-2xl bg-black/50 backdrop-blur-xl border border-white/10 shadow-2xl pointer-events-auto animate-fade-in">
-            <div className="text-3xl mb-3">🌍</div>
-            <p className="text-white font-medium text-lg">Search any city to find work-friendly cafés</p>
-            <p className="text-gray-500 text-sm mt-1">Use the search box above to get started</p>
+            <p className="text-white font-medium text-lg">Search a city above to find work-friendly cafés 🔍</p>
           </div>
         </div>
       )}

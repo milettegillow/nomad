@@ -13,6 +13,8 @@ export interface Cafe {
   foursquare_rating: number | null;
   confidence: 'verified' | 'inferred' | 'unconfirmed';
   last_updated: string;
+  blog_sources?: string[];
+  work_summary?: string;
 }
 
 export interface Submission {
