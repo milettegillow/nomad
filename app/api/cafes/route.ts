@@ -97,8 +97,9 @@ async function enrichWithReviews(
   seating_rating: number | null;
   confidence: 'inferred' | 'unconfirmed';
   reason: string;
+  key_quote: string | null;
 }> {
-  const fallback = { laptop_allowed: null, wifi_rating: null, seating_rating: null, confidence: 'unconfirmed' as const, reason: 'no data' };
+  const fallback = { laptop_allowed: null, wifi_rating: null, seating_rating: null, confidence: 'unconfirmed' as const, reason: 'no data', key_quote: null };
 
   if (reviews.length < MIN_REVIEWS_FOR_CLAUDE && !blogContext) {
     return fallback;
@@ -136,11 +137,12 @@ SEATING_RATING:
 
 CONFIDENCE: 'inferred' if laptop_allowed is true or false. 'unconfirmed' if null.
 REASON: Brief explanation of your laptop_allowed decision.
+KEY_QUOTE: Copy the single most relevant sentence verbatim from the reviews provided that best justifies your laptop_allowed decision. This must be an exact copy of text from the reviews, not a summary. Max 150 characters. If no relevant quote exists, set to null.
 
 Reviews: ${JSON.stringify(reviews)}
 Place types: ${JSON.stringify(types)}${blogSection}
 
-Return JSON: { "laptop_allowed": ..., "wifi_rating": ..., "seating_rating": ..., "confidence": "...", "reason": "..." }`,
+Return JSON: { "laptop_allowed": ..., "wifi_rating": ..., "seating_rating": ..., "confidence": "...", "reason": "...", "key_quote": ... }`,
       }],
     });
 
@@ -155,6 +157,7 @@ Return JSON: { "laptop_allowed": ..., "wifi_rating": ..., "seating_rating": ...,
       seating_rating: typeof parsed.seating_rating === 'number' && parsed.seating_rating >= 1 && parsed.seating_rating <= 5 ? parsed.seating_rating : null,
       confidence: parsed.confidence === 'inferred' ? 'inferred' : 'unconfirmed',
       reason: typeof parsed.reason === 'string' ? parsed.reason : 'unknown',
+      key_quote: typeof parsed.key_quote === 'string' && parsed.key_quote.length > 0 ? parsed.key_quote.substring(0, 150) : null,
     };
   } catch (e) {
     console.error('[Pipeline] Review enrichment error for', cafeName, ':', e);
@@ -330,6 +333,7 @@ export async function POST(request: Request) {
           let seating_rating: number | null = null;
           let confidence: string = 'unconfirmed';
           let reason = 'no data';
+          let keyQuote: string | null = null;
 
           if (w.skipEnrichment && w.existing) {
             laptop_allowed = w.existing.laptop_allowed as boolean | null;
@@ -337,6 +341,7 @@ export async function POST(request: Request) {
             seating_rating = w.existing.seating_rating as number | null;
             confidence = w.existing.confidence as string;
             reason = (w.existing.enrichment_reason as string) || 'cached';
+            keyQuote = (w.existing.key_review_quote as string) || null;
           } else {
             const claudeResult = claudeResults.get(w.place.id);
 
@@ -346,6 +351,7 @@ export async function POST(request: Request) {
               seating_rating = claudeResult.seating_rating;
               confidence = claudeResult.confidence;
               reason = claudeResult.reason;
+              keyQuote = claudeResult.key_quote;
             }
 
             // Preserve non-null fields from existing stale data
@@ -385,6 +391,7 @@ export async function POST(request: Request) {
             blog_sources: null as string[] | null,
             work_summary: null as string | null,
             enrichment_reason: reason,
+            key_review_quote: keyQuote,
           };
         });
 
