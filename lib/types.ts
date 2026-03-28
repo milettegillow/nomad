@@ -15,6 +15,7 @@ export interface Cafe {
   last_updated: string;
   blog_sources?: string[];
   work_summary?: string;
+  enrichment_reason?: string;
 }
 
 export interface Submission {

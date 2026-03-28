@@ -58,8 +58,10 @@ function popupHTML(cafe: Cafe) {
       <div style="font-size:13px;margin-bottom:4px">Laptop: ${laptopLabel(cafe)}</div>
       <div style="font-size:13px;margin-bottom:4px">WiFi: ${wifiLabel(cafe)}</div>
       <div style="font-size:13px;margin-bottom:4px">Seating: ${dots(cafe.seating_rating)}${cafe.seating_rating != null ? sourceLabel(cafe.confidence) : ''}</div>
-      <div style="margin-bottom:${cafe.work_summary ? '4' : '8'}px">${confidenceBadge(cafe.confidence)}</div>
-      ${cafe.work_summary ? `<div style="font-size:12px;color:#9ca3af;font-style:italic;margin-bottom:8px">${cafe.work_summary}</div>` : ''}
+      <div style="margin-bottom:4px">${confidenceBadge(cafe.confidence)}</div>
+      ${cafe.enrichment_reason ? `<div style="font-size:11px;color:#6b7280;font-style:italic;margin-bottom:4px">${cafe.enrichment_reason}</div>` : ''}
+      ${cafe.blog_sources && cafe.blog_sources.length > 0 ? `<div style="margin-bottom:4px"><a href="${cafe.blog_sources[0]}" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:#60a5fa;text-decoration:none">📰 Source</a></div>` : ''}
+      ${cafe.work_summary ? `<div style="font-size:12px;color:#9ca3af;font-style:italic;margin-bottom:8px">${cafe.work_summary}</div>` : '<div style="margin-bottom:4px"></div>'}
       <button
         data-cafe-id="${cafe.id}"
         class="suggest-correction-btn"

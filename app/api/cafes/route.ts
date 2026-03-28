@@ -34,6 +34,19 @@ interface BlogCafe {
   source_url: string | null;
 }
 
+function normalizeName(s: string): string {
+  return s.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, '').trim();
+}
+
+function namesMatch(a: string, b: string): boolean {
+  const na = normalizeName(a);
+  const nb = normalizeName(b);
+  return na.includes(nb) || nb.includes(na) ||
+    na.split(' ').some(word => word.length > 3 && nb.includes(word));
+}
+
 function blogHasExplicitWorkMention(bc: BlogCafe): boolean {
   const notes = [bc.laptop_notes, bc.wifi_notes].filter(Boolean).join(' ').toLowerCase();
   const workKeywords = ['laptop', 'remote work', 'coworking', 'work from', 'study', 'freelanc', 'digital nomad', 'wifi', 'outlets', 'plug'];
@@ -127,7 +140,8 @@ async function enrichWithReviews(
   cafeName: string,
   reviews: string[],
   types: string[],
-  blogNotes: BlogCafe | null
+  blogNotes: BlogCafe | null,
+  isBlogResult: boolean
 ): Promise<{
   laptop_allowed: boolean | null;
   wifi_rating: number | null;
@@ -136,39 +150,65 @@ async function enrichWithReviews(
   confidence: 'inferred' | 'unconfirmed';
   reason: string;
 }> {
+  // Blog results are automatically laptop-friendly — they were found in "best work cafés" lists
+  if (isBlogResult && reviews.length < MIN_REVIEWS_FOR_CLAUDE) {
+    const summary = blogNotes
+      ? [blogNotes.laptop_notes, blogNotes.wifi_notes].filter(Boolean).join('. ') || 'Recommended for remote work in blog articles'
+      : 'Recommended for remote work in blog articles';
+    return {
+      laptop_allowed: true,
+      wifi_rating: blogNotes?.wifi_notes ? 3 : null,
+      seating_rating: blogNotes?.seating_notes ? 3 : null,
+      work_summary: summary,
+      confidence: 'inferred',
+      reason: 'found in work-friendly café blog list',
+    };
+  }
+
   const fallback = { laptop_allowed: null, wifi_rating: null, seating_rating: null, work_summary: null, confidence: 'unconfirmed' as const, reason: 'no data' };
 
   const hasBlogNotes = blogNotes && (blogNotes.wifi_notes || blogNotes.laptop_notes || blogNotes.seating_notes);
 
-  // Build blog context for Claude
   const blogContext = hasBlogNotes
-    ? `\nBlog/article notes about this café:\n- Laptops: ${blogNotes!.laptop_notes || 'not mentioned'}\n- WiFi: ${blogNotes!.wifi_notes || 'not mentioned'}\n- Seating: ${blogNotes!.seating_notes || 'not mentioned'}\nUse these blog notes as additional evidence.`
+    ? `\nBlog/article notes about this café:\n- Laptops: ${blogNotes!.laptop_notes || 'not mentioned'}\n- WiFi: ${blogNotes!.wifi_notes || 'not mentioned'}\n- Seating: ${blogNotes!.seating_notes || 'not mentioned'}\nThese blog notes are strong evidence — use them.`
+    : '';
+
+  const blogResultContext = isBlogResult
+    ? '\nIMPORTANT: This café was found in a blog search for "best cafés to work from". This is strong evidence it is laptop-friendly. Set laptop_allowed=true unless reviews explicitly contradict this.'
     : '';
 
   try {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 300,
-      system: 'You are analyzing café reviews to determine if the café is suitable for laptop work. Be VERY CONSERVATIVE. When in doubt, return null. Return ONLY a valid JSON object.',
+      system: 'You are analyzing café reviews to determine work-friendliness. Make reasonable inferences from context. Return ONLY a valid JSON object.',
       messages: [{
         role: 'user',
-        content: `Analyze these reviews for "${cafeName}". Be strict — only set values with clear textual evidence.
+        content: `Analyze these reviews for "${cafeName}".
 
-LAPTOP_ALLOWED RULES (most important field):
-- Set true ONLY if the text contains one of these exact signals: "laptop", "coworking", "remote work", "work from", "studying", "good for work", "nomad", "freelancer", or the café name itself contains "coworking".
-- Set false ONLY if the text contains one of these exact signals: "no wifi", "no laptop", "asked to leave", "time limit", "not suitable for work", "can't work", "terrible for studying", "not a place to work".
-- Set null for EVERYTHING ELSE. Reviews about coffee, food, ambiance, service, decor, or atmosphere do NOT count. "Cozy" does not mean laptop-friendly. "Spacious" does not mean laptop-friendly. When in doubt, null.
+LAPTOP_ALLOWED:
+- true if reviews mention ANY of: "work", "study", "laptop", "wifi", "quiet", "coworking", "nomad", "remote", "productive", "good atmosphere to work", "freelancer", "outlet", "plug", or if people seem to spend long periods there.
+- false ONLY if reviews explicitly say: "no wifi", "no laptops", "asked to leave", "time limit", "too noisy to work", "not suitable for work".
+- null only if reviews contain absolutely nothing about the work environment.
 
-WIFI_RATING: 1-5 ONLY if reviews contain the word "wifi", "wi-fi", "internet", "connection", or "password". Otherwise null.
-SEATING_RATING: 1-5 ONLY if reviews mention "seating", "tables", "space", "outlets", "plugs", "cramped". Otherwise null.
+WIFI_RATING:
+- 4-5 if reviews say "fast wifi", "great wifi", "strong wifi", "reliable internet"
+- 2-3 if reviews say "ok wifi", "slow wifi", "decent wifi"
+- 1 if reviews say "terrible wifi", "wifi doesn't work"
+- null only if wifi is not mentioned at all
 
-WORK_SUMMARY: One sentence. If laptop_allowed=true, explain why. If laptop_allowed=false, explain why NOT (must be negative). If laptop_allowed=null, say "No work-related mentions in reviews." The summary MUST be consistent with laptop_allowed — never say "great for work" when laptop_allowed=false or null.
+SEATING_RATING:
+- 4-5 if reviews mention "spacious", "plenty of seats", "lots of tables", "big space", "outlets everywhere"
+- 2-3 if reviews mention "average space", "some seating"
+- 1-2 if reviews mention "small", "few seats", "cramped", "tiny"
+- null only if seating/space is not mentioned
 
-CONFIDENCE: 'inferred' ONLY if laptop_allowed is true or false. 'unconfirmed' if laptop_allowed is null.
-REASON: 5-10 words explaining your laptop_allowed decision. If null, say "no work-related keywords found".
+WORK_SUMMARY: One sentence describing work-friendliness. Be specific about what was mentioned.
+CONFIDENCE: 'inferred' if laptop_allowed is true or false. 'unconfirmed' if null.
+REASON: Brief explanation of your laptop_allowed decision.
 
 Reviews: ${JSON.stringify(reviews)}
-Place types: ${JSON.stringify(types)}${blogContext}
+Place types: ${JSON.stringify(types)}${blogContext}${blogResultContext}
 
 Return JSON: { "laptop_allowed": ..., "wifi_rating": ..., "seating_rating": ..., "work_summary": "...", "confidence": "...", "reason": "..." }`,
       }],
@@ -177,7 +217,8 @@ Return JSON: { "laptop_allowed": ..., "wifi_rating": ..., "seating_rating": ...,
     const content = response.content[0];
     if (content.type !== 'text') return fallback;
 
-    const parsed = JSON.parse(content.text);
+    const cleaned = content.text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const parsed = JSON.parse(cleaned);
     return {
       laptop_allowed: typeof parsed.laptop_allowed === 'boolean' ? parsed.laptop_allowed : null,
       wifi_rating: typeof parsed.wifi_rating === 'number' && parsed.wifi_rating >= 1 && parsed.wifi_rating <= 5 ? parsed.wifi_rating : null,
@@ -188,6 +229,10 @@ Return JSON: { "laptop_allowed": ..., "wifi_rating": ..., "seating_rating": ...,
     };
   } catch (e) {
     console.error('[Pipeline] Review enrichment error for', cafeName, ':', e);
+    // If it's a blog result and Claude failed, still mark as laptop-friendly
+    if (isBlogResult) {
+      return { laptop_allowed: true, wifi_rating: null, seating_rating: null, work_summary: 'Recommended for remote work in blog articles', confidence: 'inferred', reason: 'blog result (Claude failed)' };
+    }
     return fallback;
   }
 }
@@ -261,20 +306,14 @@ export async function POST(request: Request) {
         const nonWorkBlogCafes = blogCafes.filter(bc => !blogHasExplicitWorkMention(bc));
 
         console.log(`[Pipeline] Blog search: found ${workBlogCafes.length} cafés with explicit work mentions: ${workBlogCafes.map(c => c.name).join(', ')}`);
+        console.log(`[Pipeline] Blog cafés found: ${blogCafes.map(c => c.name).join(', ') || 'none'}`);
         if (nonWorkBlogCafes.length > 0) {
           console.log(`[Pipeline] Blog search: ${nonWorkBlogCafes.length} cafés without work mentions (ignored for laptop inference): ${nonWorkBlogCafes.map(c => c.name).join(', ')}`);
         }
         console.log('[Pipeline] Nearby search found:', nearbyPlaces.length, 'places');
 
-        // Build blog notes lookup — ALL blog cafés get notes, but only work-mentioned ones get laptop pre-set
-        const blogNotesMap = new Map<string, BlogCafe>();
-        const workMentionedNames = new Set<string>();
-        for (const bc of blogCafes) {
-          blogNotesMap.set(bc.name.toLowerCase(), bc);
-        }
-        for (const bc of workBlogCafes) {
-          workMentionedNames.add(bc.name.toLowerCase());
-        }
+        // Blog café lists for fuzzy matching later
+        // (no Map/Set — we use namesMatch() for lookup)
 
         // Google Text Search for blog-mentioned cafés
         send({ type: 'status', message: `⭐ Looking up Google ratings...` });
@@ -333,7 +372,6 @@ export async function POST(request: Request) {
         }
 
         const workItems: CafeWorkItem[] = allPlaces.map(place => {
-          const placeName = (place.displayName?.text || '').toLowerCase();
           const existing = existingByPlaceId.get(place.id);
           const existingIsFresh = existing
             && existing.confidence !== 'unconfirmed'
@@ -347,8 +385,8 @@ export async function POST(request: Request) {
           return {
             place,
             existing,
-            blogNotes: blogNotesMap.get(placeName) || null,
-            isWorkMentioned: workMentionedNames.has(placeName),
+            blogNotes: blogCafes.find(bc => namesMatch(bc.name, place.displayName?.text || '')) || null,
+            isWorkMentioned: workBlogCafes.some(bc => namesMatch(bc.name, place.displayName?.text || '')),
             skipEnrichment: !!existingIsFresh,
             reviewTexts,
           };
@@ -372,6 +410,7 @@ export async function POST(request: Request) {
               w.reviewTexts,
               w.place.types || [],
               w.blogNotes,
+              w.isWorkMentioned,
             ))
           );
           for (let j = 0; j < batch.length; j++) {
@@ -409,11 +448,12 @@ export async function POST(request: Request) {
               reason = claudeResult.reason;
             }
 
-            // Blog with explicit work mention: only set laptop_allowed if Claude didn't determine it
+            // Blog result: set laptop_allowed=true if Claude didn't already determine it
             if (w.isWorkMentioned && laptop_allowed === null) {
               laptop_allowed = true;
               confidence = 'inferred';
-              reason = 'blog explicitly mentions work-friendliness';
+              reason = 'found in work-friendly café blog list';
+              if (!workSummary) workSummary = 'Recommended for remote work in blog articles';
             }
 
             // Preserve non-null fields from existing stale data
@@ -444,7 +484,14 @@ export async function POST(request: Request) {
             }
           }
 
-          console.log(`[Pipeline] ${placeName}: laptop=${laptop_allowed} reason="${reason}"`);
+          // Use existing reason if cached
+          if (w.skipEnrichment && w.existing?.enrichment_reason) {
+            reason = w.existing.enrichment_reason as string;
+          }
+
+          console.log(`[Pipeline] ${placeName}: laptop=${laptop_allowed} wifi=${wifi_rating} confidence=${confidence}`);
+          console.log(`[Pipeline] ${placeName} reason: ${reason}`);
+          console.log(`[Pipeline] ${placeName} was in blog results: ${w.isWorkMentioned}`);
 
           return {
             name: placeName,
@@ -462,6 +509,7 @@ export async function POST(request: Request) {
             last_updated: new Date().toISOString(),
             blog_sources: w.blogNotes?.source_url ? [w.blogNotes.source_url] : (w.existing?.blog_sources as string[] | null) || null,
             work_summary: workSummary,
+            enrichment_reason: reason,
           };
         });
 
