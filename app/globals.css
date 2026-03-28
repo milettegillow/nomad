@@ -9,23 +9,25 @@
 html, body {
   height: 100%;
   overflow: hidden;
-  background: #000;
+  background: #f8f9fa;
 }
 
-/* Mapbox popup overrides */
+/* Mapbox popup overrides — dark premium card */
 .mapboxgl-popup-content {
-  background: rgba(17, 17, 17, 0.95) !important;
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  border-radius: 12px !important;
-  padding: 14px !important;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important;
+  background: rgba(20, 20, 25, 0.96) !important;
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 16px !important;
+  padding: 18px !important;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4) !important;
+  overflow: visible !important;
 }
+
 
 .mapboxgl-popup-close-button {
   color: #9ca3af !important;
-  font-size: 18px !important;
-  padding: 4px 8px !important;
+  font-size: 20px !important;
+  padding: 6px 10px !important;
 }
 
 .mapboxgl-popup-close-button:hover {
@@ -34,7 +36,7 @@ html, body {
 }
 
 .mapboxgl-popup-tip {
-  border-top-color: rgba(17, 17, 17, 0.95) !important;
+  border-top-color: rgba(20, 20, 25, 0.96) !important;
 }
 
 /* Slide-up animation */

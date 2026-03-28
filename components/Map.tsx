@@ -11,19 +11,19 @@ import CorrectionPanel from './CorrectionPanel';
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!;
 
 function markerColor(cafe: Cafe): string {
-  if (cafe.laptop_allowed === true) return '#22c55e';
-  if (cafe.laptop_allowed === false) return '#ef4444';
-  return '#eab308';
+  if (cafe.laptop_allowed === true) return '#34a853';
+  if (cafe.laptop_allowed === false) return '#ea4335';
+  return '#fbbc04';
 }
 
 function confidenceBadge(confidence: string) {
   switch (confidence) {
     case 'verified':
-      return '<span style="color:#22c55e;font-size:11px">✓ Verified</span> <span style="color:#6b7280;font-size:10px">via community</span>';
+      return '<span style="color:#34a853;font-size:13px;font-weight:500">✓ Verified</span> <span style="color:#6b7280;font-size:12px">via community</span>';
     case 'inferred':
-      return '<span style="color:#eab308;font-size:11px">~ Likely</span> <span style="color:#6b7280;font-size:10px">via reviews</span>';
+      return '<span style="color:#fbbc04;font-size:13px;font-weight:500">~ Likely</span> <span style="color:#6b7280;font-size:12px">via reviews</span>';
     default:
-      return '<span style="color:#9ca3af;font-size:11px">? Unconfirmed</span>';
+      return '<span style="color:#9ca3af;font-size:13px">? Unconfirmed</span>';
   }
 }
 
@@ -33,40 +33,38 @@ function dots(rating: number | null) {
 }
 
 function sourceLabel(confidence: string) {
-  if (confidence === 'verified') return '<span style="color:#6b7280;font-size:10px;margin-left:4px">via community</span>';
-  if (confidence === 'inferred') return '<span style="color:#6b7280;font-size:10px;margin-left:4px">via reviews</span>';
+  if (confidence === 'verified') return '<span style="color:#6b7280;font-size:11px;margin-left:4px">via community</span>';
+  if (confidence === 'inferred') return '<span style="color:#6b7280;font-size:11px;margin-left:4px">via reviews</span>';
   return '';
 }
 
 function laptopLabel(cafe: Cafe) {
-  if (cafe.laptop_allowed === true) return `<span style="color:#22c55e">✓ Allowed</span>${sourceLabel(cafe.confidence)}`;
-  if (cafe.laptop_allowed === false) return `<span style="color:#ef4444">✗ Not allowed</span>${sourceLabel(cafe.confidence)}`;
+  if (cafe.laptop_allowed === true) return `<span style="color:#34a853">✓ Allowed</span>${sourceLabel(cafe.confidence)}`;
+  if (cafe.laptop_allowed === false) return `<span style="color:#ea4335">✗ Not allowed</span>${sourceLabel(cafe.confidence)}`;
   return '<span style="color:#9ca3af">? Unknown</span>';
 }
 
 function wifiLabel(cafe: Cafe) {
-  if (cafe.wifi_rating != null) return `<span style="color:#22c55e">✓ Available</span> <span style="color:#9ca3af;font-size:11px">(${cafe.wifi_rating}/5)</span>${sourceLabel(cafe.confidence)}`;
+  if (cafe.wifi_rating != null) return `<span style="color:#34a853">✓ Available</span> <span style="color:#9ca3af;font-size:13px">(${cafe.wifi_rating}/5)</span>${sourceLabel(cafe.confidence)}`;
   return '<span style="color:#9ca3af">? Unknown</span>';
 }
 
 function popupHTML(cafe: Cafe) {
   return `
-    <div style="font-family:system-ui;color:#e5e7eb;min-width:200px">
-      <div style="font-weight:600;font-size:15px;margin-bottom:6px;color:#fff">${cafe.name}</div>
-      ${cafe.address ? `<div style="font-size:12px;color:#9ca3af;margin-bottom:8px">${cafe.address}</div>` : ''}
-      ${cafe.google_rating != null ? `<div style="font-size:18px;margin-bottom:6px">⭐ ${cafe.google_rating.toFixed(1)}</div>` : ''}
-      <div style="font-size:13px;margin-bottom:4px">Laptop: ${laptopLabel(cafe)}</div>
-      <div style="font-size:13px;margin-bottom:4px">WiFi: ${wifiLabel(cafe)}</div>
-      <div style="font-size:13px;margin-bottom:4px">Seating: ${dots(cafe.seating_rating)}${cafe.seating_rating != null ? sourceLabel(cafe.confidence) : ''}</div>
-      <div style="margin-bottom:4px">${confidenceBadge(cafe.confidence)}</div>
-      ${cafe.enrichment_reason ? `<div style="font-size:11px;color:#6b7280;font-style:italic;margin-bottom:4px">${cafe.enrichment_reason}${cafe.key_review_quote ? ` <span class="quote-trigger" style="cursor:pointer;position:relative;display:inline-block" onclick="this.querySelector('.quote-tooltip').style.display=this.querySelector('.quote-tooltip').style.display==='block'?'none':'block'" onmouseenter="this.querySelector('.quote-tooltip').style.display='block'" onmouseleave="this.querySelector('.quote-tooltip').style.display='none'">❓<span class="quote-tooltip" style="display:none;position:absolute;bottom:20px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#e5e7eb;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:8px 10px;font-size:11px;font-style:normal;max-width:240px;min-width:160px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.5);white-space:normal"><span style="color:#9ca3af;font-size:10px;display:block;margin-bottom:4px">Key review:</span>"${cafe.key_review_quote}"</span></span>` : ''}</div>` : ''}
-      ${cafe.google_place_id ? `<div style="margin-bottom:4px"><a href="https://www.google.com/maps/place/?q=place_id:${cafe.google_place_id}" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:#60a5fa;text-decoration:none">${cafe.enrichment_reason?.toLowerCase().includes('review') ? '📍 View Google reviews' : '📍 View on Google Maps'}</a></div>` : ''}
-      ${cafe.blog_sources && cafe.blog_sources.length > 0 ? cafe.blog_sources.map((url: string) => `<div style="margin-bottom:2px"><a href="${url}" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:#60a5fa;text-decoration:none">📰 Blog source</a></div>`).join('') : ''}
-      <div style="margin-bottom:4px"></div>
+    <div style="font-family:system-ui;color:#e5e7eb;min-width:280px">
+      <div style="font-weight:700;font-size:19px;margin-bottom:8px;color:#fff;line-height:1.3">${cafe.name}</div>
+      ${cafe.address ? `<div style="font-size:14px;color:#9ca3af;margin-bottom:12px;line-height:1.4">${cafe.address}</div>` : ''}
+      ${cafe.google_rating != null ? `<div style="font-size:26px;margin-bottom:10px;line-height:1">⭐ ${cafe.google_rating.toFixed(1)}</div>` : ''}
+      <div style="font-size:15px;margin-bottom:7px;line-height:1.6">Laptop: ${laptopLabel(cafe)}</div>
+      <div style="font-size:15px;margin-bottom:7px;line-height:1.6">WiFi: ${wifiLabel(cafe)}</div>
+      <div style="font-size:15px;margin-bottom:10px;line-height:1.6">Seating: ${dots(cafe.seating_rating)}${cafe.seating_rating != null ? sourceLabel(cafe.confidence) : ''}</div>
+      <div style="margin-top:12px;margin-bottom:8px">${confidenceBadge(cafe.confidence)}</div>
+      ${cafe.enrichment_reason ? `<div style="font-size:12px;color:#6b7280;font-style:italic;margin-bottom:6px;line-height:1.4">${cafe.enrichment_reason}${cafe.key_review_quote ? ` <span style="cursor:help;color:#9ca3af;font-size:11px;border:1px solid #4b5563;border-radius:50%;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;margin-left:6px;vertical-align:middle;position:relative;font-style:normal" onmouseenter="this.querySelector('.tt').style.display='block'" onmouseleave="this.querySelector('.tt').style.display='none'">?<div class="tt" style="display:none;position:absolute;bottom:20px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#e5e7eb;font-size:11px;padding:8px 10px;border-radius:8px;width:220px;z-index:9999;border:1px solid #374151;font-style:italic;line-height:1.4;box-shadow:0 4px 12px rgba(0,0,0,0.5);white-space:normal">"${cafe.key_review_quote}"</div></span>` : ''}</div>` : ''}
+      ${cafe.google_place_id ? `<div style="margin-bottom:8px"><a href="https://www.google.com/maps/place/?q=place_id:${cafe.google_place_id}" target="_blank" rel="noopener noreferrer" style="font-size:12px;color:#60a5fa;text-decoration:none">${cafe.enrichment_reason?.toLowerCase().includes('review') ? '📍 View Google reviews' : '📍 View on Google Maps'}</a></div>` : ''}
       <button
         data-cafe-id="${cafe.id}"
         class="suggest-correction-btn"
-        style="width:100%;padding:6px 12px;background:#374151;color:#e5e7eb;border:1px solid #4b5563;border-radius:6px;cursor:pointer;font-size:12px;transition:background 0.15s"
+        style="width:100%;padding:10px 16px;background:#374151;color:#e5e7eb;border:1px solid #4b5563;border-radius:12px;cursor:pointer;font-size:13px;font-weight:500;transition:background 0.15s"
         onmouseover="this.style.background='#4b5563'"
         onmouseout="this.style.background='#374151'"
       >Suggest a correction</button>
@@ -95,13 +93,11 @@ export default function Map() {
     setTimeout(() => setToast(null), 4000);
   }, []);
 
-  // Main pipeline — SSE stream from /api/cafes
   const searchCity = useCallback(async (lat: number, lng: number, city?: string) => {
     console.log('[Map] searchCity —', city || 'unknown', 'at', lat, lng);
     setLoadingCafes(true);
     setStatusMessage(`📍 Searching ${city || 'this area'}...`);
 
-    // Abort any previous pipeline
     pipelineAbortRef.current?.abort();
     const abort = new AbortController();
     pipelineAbortRef.current = abort;
@@ -115,7 +111,6 @@ export default function Map() {
       });
 
       if (!res.ok || !res.body) {
-        console.error('[Map] Pipeline SSE error:', res.status);
         showToast('Search failed — check console');
         setLoadingCafes(false);
         setStatusMessage(null);
@@ -140,20 +135,15 @@ export default function Map() {
             const event = JSON.parse(line.slice(6));
 
             if (event.type === 'first_search') {
-              console.log('[Map] First search for city:', event.city);
               setFirstSearchCity(event.city as string);
             } else if (event.type === 'status') {
-              console.log('[Map] Status:', event.message);
               setStatusMessage(event.message);
             } else if (event.type === 'cafes') {
-              console.log('[Map] Received', event.cafes.length, 'cafés', event.cached ? '(cached)' : '(fresh)');
-              setFirstSearchCity(null); // Dismiss first-search overlay
+              setFirstSearchCity(null);
               setCafes(event.cafes as Cafe[]);
             } else if (event.type === 'error') {
-              console.error('[Map] Pipeline error:', event.message);
               showToast(event.message || 'Something went wrong');
             } else if (event.type === 'complete') {
-              console.log('[Map] Pipeline complete');
               setTimeout(() => setStatusMessage(null), 2000);
             }
           } catch {
@@ -163,7 +153,6 @@ export default function Map() {
       }
     } catch (e) {
       if ((e as Error).name !== 'AbortError') {
-        console.error('[Map] Pipeline fetch error:', e);
         showToast('Network error — check console');
       }
     } finally {
@@ -171,7 +160,6 @@ export default function Map() {
     }
   }, [showToast]);
 
-  // Ref so map init effect can call the latest version
   const searchCityRef = useRef(searchCity);
   useEffect(() => { searchCityRef.current = searchCity; }, [searchCity]);
 
@@ -183,7 +171,6 @@ export default function Map() {
     searchCityRef.current(lat, lng, city);
   }, []);
 
-  // Geolocation via Google API
   const requestLocation = useCallback(async () => {
     setLocationState('locating');
     try {
@@ -199,7 +186,6 @@ export default function Map() {
         skipNextMoveEnd.current = true;
         map.current.flyTo({ center: [data.lng, data.lat], zoom: 14, duration: 1500 });
       }
-      // No city name from geolocate — the server will reverse geocode
       searchCityRef.current(data.lat, data.lng);
     } catch {
       setLocationState('failed');
@@ -212,7 +198,7 @@ export default function Map() {
 
     const m = new mapboxgl.Map({
       container: mapContainer.current,
-      style: 'mapbox://styles/mapbox/dark-v11',
+      style: 'mapbox://styles/mapbox/outdoors-v12',
       center: [0, 20],
       zoom: 2,
     });
@@ -222,7 +208,6 @@ export default function Map() {
     m.touchZoomRotate.disableRotation();
     m.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
 
-    // No moveend auto-fetch — the new pipeline is city-based, not pan-based
     m.on('load', () => {
       requestLocation();
     });
@@ -259,25 +244,31 @@ export default function Map() {
     filtered.forEach(cafe => {
       const el = document.createElement('div');
       el.className = 'cafe-marker';
-      el.style.width = '14px';
-      el.style.height = '14px';
+      el.style.width = '18px';
+      el.style.height = '18px';
       el.style.borderRadius = '50%';
       el.style.backgroundColor = markerColor(cafe);
-      el.style.border = '2px solid rgba(0,0,0,0.3)';
+      el.style.border = '2px solid #fff';
       el.style.cursor = 'pointer';
-      el.style.boxShadow = `0 0 6px ${markerColor(cafe)}80`;
+      el.style.boxShadow = `0 0 8px ${markerColor(cafe)}90, 0 1px 3px rgba(0,0,0,0.4)`;
       el.style.transition = 'background-color 0.3s, box-shadow 0.3s';
 
       const popup = new mapboxgl.Popup({
         offset: 12,
         closeButton: true,
-        maxWidth: '280px',
+        maxWidth: '320px',
+        anchor: 'bottom',
+        className: 'nomad-popup',
       }).setHTML(popupHTML(cafe));
 
       const marker = new mapboxgl.Marker(el)
         .setLngLat([cafe.lng, cafe.lat])
         .setPopup(popup)
         .addTo(map.current!);
+
+      el.addEventListener('click', () => {
+        map.current?.panTo([cafe.lng, cafe.lat], { offset: [0, 150] });
+      });
 
       markersRef.current.set(cafe.id, { marker, el, cafe });
     });
@@ -314,7 +305,7 @@ export default function Map() {
       <div ref={mapContainer} className="w-full h-full" />
 
       {/* Search box — top left */}
-      <div className="absolute top-4 left-4 z-30">
+      <div className="absolute z-30" style={{ top: 10, left: 10 }}>
         <SearchBox
           onSelect={handleSearch}
           onTyping={() => setOverlayDismissed(true)}
@@ -325,40 +316,41 @@ export default function Map() {
       {/* My location button — top right */}
       <button
         onClick={handleMyLocation}
-        className="absolute top-4 right-4 z-20 px-3 py-2.5 rounded-xl bg-black/60 backdrop-blur-xl text-sm text-gray-300 hover:text-white border border-white/10 hover:border-white/25 transition-all shadow-lg cursor-pointer"
+        className="absolute z-20 bg-white text-base text-[#333] hover:bg-gray-50 transition-colors cursor-pointer"
+        style={{ top: 10, right: 10, height: 46, padding: '0 16px', borderRadius: 8, boxShadow: '0 2px 6px rgba(0,0,0,0.3)', border: 'none' }}
         title="Go to my location"
       >
         📍 My location
       </button>
 
-      {/* First search overlay — prominent card */}
+      {/* First search overlay */}
       {firstSearchCity && (
         <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
-          <div className="text-center px-8 py-10 rounded-2xl bg-black/60 backdrop-blur-xl border border-white/10 shadow-2xl pointer-events-auto animate-fade-in max-w-md">
-            <div className="text-4xl mb-4">🎉</div>
-            <p className="text-white font-semibold text-lg mb-2">
-              You&apos;re the first person to search {firstSearchCity} on Nomad!
+          <div className="text-center pointer-events-auto animate-fade-in" style={{ background: '#fff', borderRadius: 12, padding: '40px 48px', maxWidth: 480, boxShadow: '0 2px 6px rgba(0,0,0,0.3)' }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>🎉</div>
+            <p style={{ fontSize: 22, fontWeight: 700, color: '#202124', marginBottom: 12 }}>
+              You&apos;re the first to search {firstSearchCity}!
             </p>
-            <p className="text-gray-400 text-sm leading-relaxed">
+            <p style={{ fontSize: 16, color: '#5f6368', lineHeight: 1.6 }}>
               Sit tight while we find the best work cafés — this takes a minute but you&apos;re making it faster for everyone who comes after you ☕
             </p>
             {statusMessage && (
-              <p className="text-gray-300 text-xs mt-4 animate-fade-in">{statusMessage}</p>
+              <p style={{ fontSize: 14, color: '#80868b', marginTop: 20 }} className="animate-fade-in">{statusMessage}</p>
             )}
           </div>
         </div>
       )}
 
-      {/* Status bar — top center (hidden when first-search overlay is showing) */}
+      {/* Status bar — top center */}
       {statusMessage && !firstSearchCity && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 px-5 py-2.5 rounded-xl bg-black/70 backdrop-blur-xl border border-white/10 text-sm text-gray-200 shadow-lg animate-fade-in whitespace-nowrap">
+        <div className="absolute left-1/2 -translate-x-1/2 z-20 animate-fade-in whitespace-nowrap" style={{ top: 66, background: '#fff', borderRadius: 20, padding: '10px 20px', fontSize: 14, fontWeight: 500, color: '#333', boxShadow: '0 2px 6px rgba(0,0,0,0.3)' }}>
           {statusMessage}
         </div>
       )}
 
-      {/* Location status toast — only while locating */}
+      {/* Location status toast */}
       {locationState === 'locating' && !statusMessage && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 px-5 py-3 rounded-xl bg-black/70 backdrop-blur-xl border border-white/10 text-sm text-gray-300 shadow-lg animate-fade-in">
+        <div className="absolute left-1/2 -translate-x-1/2 z-20 animate-fade-in" style={{ top: 66, background: '#fff', borderRadius: 20, padding: '10px 20px', fontSize: 14, fontWeight: 500, color: '#5f6368', boxShadow: '0 2px 6px rgba(0,0,0,0.3)' }}>
           📍 Finding your location...
         </div>
       )}
@@ -366,15 +358,15 @@ export default function Map() {
       {/* Search prompt overlay */}
       {showSearchOverlay && (
         <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-          <div className="text-center px-6 py-8 rounded-2xl bg-black/50 backdrop-blur-xl border border-white/10 shadow-2xl pointer-events-auto animate-fade-in">
-            <p className="text-white font-medium text-lg">Search a city above to find work-friendly cafés 🔍</p>
+          <div className="text-center pointer-events-auto animate-fade-in" style={{ background: '#fff', borderRadius: 12, padding: '32px 40px', boxShadow: '0 2px 6px rgba(0,0,0,0.3)' }}>
+            <p style={{ fontSize: 20, fontWeight: 600, color: '#202124' }}>Search a city above to find work-friendly cafés 🔍</p>
           </div>
         </div>
       )}
 
       {/* Toast notification — bottom right */}
       {toast && (
-        <div className="absolute bottom-16 right-4 z-30 px-4 py-2.5 rounded-xl bg-black/80 backdrop-blur-xl border border-white/10 text-sm text-gray-300 shadow-lg animate-fade-in">
+        <div className="absolute bottom-16 right-4 z-30 animate-fade-in" style={{ background: '#fff', borderRadius: 8, padding: '12px 20px', fontSize: 14, color: '#333', boxShadow: '0 2px 6px rgba(0,0,0,0.3)' }}>
           {toast}
         </div>
       )}
@@ -390,7 +382,6 @@ export default function Map() {
           onClose={() => setCorrectionCafe(null)}
           onSubmitted={() => {
             setCorrectionCafe(null);
-            // Re-search current area
             if (map.current) {
               const center = map.current.getCenter();
               searchCityRef.current(center.lat, center.lng);

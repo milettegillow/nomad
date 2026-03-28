@@ -6,6 +6,20 @@ interface FilterState {
   seating: boolean;
 }
 
+const chipStyle = (active: boolean): React.CSSProperties => ({
+  background: active ? '#1a73e8' : '#fff',
+  color: active ? '#fff' : '#333',
+  borderRadius: 20,
+  padding: '8px 16px',
+  fontSize: 14,
+  fontWeight: 500,
+  border: 'none',
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+  boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+  transition: 'background 0.15s, color 0.15s',
+});
+
 export default function Filters({
   filters,
   onChange,
@@ -17,24 +31,15 @@ export default function Filters({
     onChange({ ...filters, [key]: !filters[key] });
   };
 
-  const btn = (active: boolean) =>
-    `px-4 py-2 text-xs font-medium transition-all cursor-pointer select-none whitespace-nowrap ${
-      active
-        ? 'bg-white/20 text-white'
-        : 'text-gray-400 hover:text-gray-200 hover:bg-white/10'
-    }`;
-
   return (
-    <div className="inline-flex rounded-full bg-black/60 backdrop-blur-xl border border-white/10 overflow-hidden shadow-lg">
-      <button className={`${btn(filters.laptop)} rounded-l-full pl-5`} onClick={() => toggle('laptop')}>
+    <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+      <button style={chipStyle(filters.laptop)} onClick={() => toggle('laptop')}>
         💻 Laptop friendly
       </button>
-      <div className="w-px bg-white/10" />
-      <button className={btn(filters.wifi)} onClick={() => toggle('wifi')}>
+      <button style={chipStyle(filters.wifi)} onClick={() => toggle('wifi')}>
         📶 Has WiFi
       </button>
-      <div className="w-px bg-white/10" />
-      <button className={`${btn(filters.seating)} rounded-r-full pr-5`} onClick={() => toggle('seating')}>
+      <button style={chipStyle(filters.seating)} onClick={() => toggle('seating')}>
         🪑 Has seating
       </button>
     </div>

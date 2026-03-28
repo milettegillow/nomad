@@ -5,7 +5,7 @@ import { useState, useRef, useEffect } from 'react';
 interface SearchResult {
   id: string;
   place_name: string;
-  text: string; // city/place name only
+  text: string;
   center: [number, number];
 }
 
@@ -71,33 +71,46 @@ export default function SearchBox({
   };
 
   return (
-    <div ref={containerRef} className="relative" style={{ minWidth: 300 }}>
-      <div className="relative">
+    <div ref={containerRef} className="relative" style={{ width: 400 }}>
+      <div className="relative" style={{ boxShadow: '0 2px 6px rgba(0,0,0,0.3)', borderRadius: 8 }}>
+        <div className="absolute top-1/2 -translate-y-1/2 text-gray-400" style={{ left: 12 }}>
+          {loading ? (
+            <div className="w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          )}
+        </div>
         <input
           type="text"
           value={query}
           onChange={(e) => search(e.target.value)}
-          placeholder="Search a city or neighborhood…"
-          className="w-full px-4 py-2.5 pr-10 rounded-xl bg-black/60 backdrop-blur-xl text-white placeholder-gray-500 border border-white/10 outline-none focus:border-white/25 text-sm transition-colors shadow-lg"
+          placeholder="Search a city..."
+          style={{ height: 46, borderRadius: 8, paddingLeft: 40 }}
+          className="w-full pr-4 bg-white text-gray-800 placeholder-gray-400 border-none outline-none text-base"
         />
-        {loading && (
-          <div className="absolute right-3 top-1/2 -translate-y-1/2">
-            <div className="w-4 h-4 border-2 border-white/20 border-t-white/70 rounded-full animate-spin" />
-          </div>
-        )}
       </div>
       {open && results.length > 0 && (
-        <ul className="absolute top-full mt-1.5 w-full bg-black/85 backdrop-blur-xl rounded-xl border border-white/10 overflow-hidden z-50 shadow-2xl">
-          {results.map((r) => (
-            <li key={r.id}>
-              <button
-                onClick={() => select(r)}
-                className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-white/10 transition-colors"
-              >
-                {r.place_name}
-              </button>
-            </li>
-          ))}
+        <ul className="absolute top-full mt-1 w-full bg-white overflow-hidden z-50" style={{ borderRadius: 8, boxShadow: '0 2px 6px rgba(0,0,0,0.3)' }}>
+          {results.map((r, i) => {
+            const commaIdx = r.place_name.indexOf(',');
+            const primary = commaIdx > -1 ? r.place_name.substring(0, commaIdx) : r.place_name;
+            const secondary = commaIdx > -1 ? r.place_name.substring(commaIdx + 1).trim() : null;
+            return (
+              <li key={r.id}>
+                <button
+                  onClick={() => select(r)}
+                  className="w-full text-left hover:bg-gray-100 transition-colors"
+                  style={{
+                    padding: '14px 20px',
+                    borderBottom: i < results.length - 1 ? '1px solid #f0f0f0' : 'none',
+                  }}
+                >
+                  <div style={{ fontSize: 15, fontWeight: 500, color: '#202124' }}>{primary}</div>
+                  {secondary && <div style={{ fontSize: 13, color: '#666', marginTop: 2 }}>{secondary}</div>}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
