@@ -13,6 +13,11 @@ export interface BlogCafe {
   source_url: string | null;
 }
 
+export interface NegativeCafe {
+  name: string;
+  issue: string;
+}
+
 interface BraveResult {
   title: string;
   url: string;
@@ -47,6 +52,19 @@ async function braveSearch(query: string): Promise<BraveResult[]> {
   }
 }
 
+function deduplicateByUrl(results: BraveResult[]): BraveResult[] {
+  const seen = new Set<string>();
+  return results.filter(r => {
+    if (seen.has(r.url)) return false;
+    seen.add(r.url);
+    return true;
+  });
+}
+
+function buildSearchContext(results: BraveResult[]): string {
+  return results.map((r, i) => `[Result ${i + 1}] URL: ${r.url}\nTitle: ${r.title}\nSnippet: ${r.description}`).join('\n\n');
+}
+
 export async function POST(request: Request) {
   const { city } = await request.json() as { city: string };
 
@@ -58,36 +76,45 @@ export async function POST(request: Request) {
   const startTime = Date.now();
 
   try {
-    // 3 parallel Brave Search queries
-    const [results1, results2, results3] = await Promise.all([
+    // 5 parallel Brave Search queries — 3 positive, 2 negative/reddit
+    const [results1, results2, results3, results4, results5] = await Promise.all([
       braveSearch(`best cafes to work from in ${city}`),
-      braveSearch(`laptop friendly cafes wifi ${city}`),
-      braveSearch(`remote work cafe coworking ${city}`),
+      braveSearch(`best coworking cafes ${city}`),
+      braveSearch(`laptop friendly cafes ${city} wifi`),
+      braveSearch(`remote work digital nomad cafe ${city}`),
+      braveSearch(`site:reddit.com "${city}" cafe laptop wifi working`),
     ]);
 
-    const allResults = [...results1, ...results2, ...results3];
-    console.log('[Search Blogs] Total Brave results:', allResults.length);
+    // Positive results (queries 1-4 + reddit)
+    const positiveResults = deduplicateByUrl([...results1, ...results2, ...results3, ...results4, ...results5]);
+    // Negative results (reddit can have both positive and negative)
+    const negativeResults = deduplicateByUrl([...results5]);
 
-    if (allResults.length === 0) {
-      console.log('[Search Blogs] No search results found');
-      return Response.json({ cafes: [] });
+    console.log('[Search Blogs] Positive results:', positiveResults.length, '| Negative results:', negativeResults.length);
+
+    // Extract positive cafés and negative cafés in parallel with Claude
+    const [cafes, negativeCafes] = await Promise.all([
+      extractPositiveCafes(positiveResults, city),
+      extractNegativeCafes(negativeResults, city),
+    ]);
+
+    const elapsed = Date.now() - startTime;
+    console.log(`[Search Blogs] Found ${cafes.length} positive cafés in ${elapsed}ms: ${cafes.map(c => c.name).join(', ')}`);
+    if (negativeCafes.length > 0) {
+      console.log(`[Search Blogs] Found ${negativeCafes.length} negative cafés: ${negativeCafes.map(c => `${c.name} (${c.issue})`).join(', ')}`);
     }
 
-    // Deduplicate by URL
-    const seen = new Set<string>();
-    const uniqueResults = allResults.filter(r => {
-      if (seen.has(r.url)) return false;
-      seen.add(r.url);
-      return true;
-    });
+    return Response.json({ cafes, negative_cafes: negativeCafes });
+  } catch (e) {
+    console.error('[Search Blogs] Error:', e);
+    return Response.json({ cafes: [], negative_cafes: [] });
+  }
+}
 
-    // Build context for Claude
-    const searchContext = uniqueResults
-      .map(r => `[${r.title}](${r.url})\n${r.description}`)
-      .join('\n\n');
+async function extractPositiveCafes(results: BraveResult[], city: string): Promise<BlogCafe[]> {
+  if (results.length === 0) return [];
 
-    console.log('[Search Blogs] Sending', uniqueResults.length, 'unique results to Claude');
-
+  try {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 2048,
@@ -96,27 +123,30 @@ export async function POST(request: Request) {
         role: 'user',
         content: `From these search results about cafes in ${city}, extract a list of specific cafe names that are mentioned as good for working, laptops, or remote work. For each cafe found, note any explicit mentions of wifi quality, laptop policy, or seating.
 
-Only include cafés with SPECIFIC NAMES mentioned in the results. Do not make up names. If a result just says "best cafes in ${city}" but doesn't name any, skip it.
+RULES:
+- Only include cafés with SPECIFIC NAMES mentioned in the results. Do not make up names.
+- If a result just says "best cafes" but doesn't name specific cafés, skip it.
+- source_url: Only assign a source_url to a café if that specific URL's content explicitly mentions that café by name. Do not assign a URL from one article to a café mentioned in a different article. If you cannot confidently attribute a URL to a specific café, set source_url to null.
+- wifi_notes, laptop_notes, seating_notes: set to null if not explicitly mentioned in the same result that names the café.
+
+Each search result below has a URL, title, and snippet. Match café names to the specific result that mentions them.
 
 Search results:
-${searchContext}
+${buildSearchContext(results)}
 
 Return ONLY valid JSON:
 { "cafes": [{ "name": "...", "wifi_notes": "...", "laptop_notes": "...", "seating_notes": "...", "source_url": "..." }] }
 
-wifi_notes, laptop_notes, seating_notes should be null if not explicitly mentioned. source_url should be the URL of the article where the café was found. Return up to 15 cafés.`,
+Return up to 15 cafés.`,
       }],
     });
 
     const content = response.content[0];
-    if (content.type !== 'text') {
-      console.log('[Search Blogs] No text response from Claude');
-      return Response.json({ cafes: [] });
-    }
+    if (content.type !== 'text') return [];
 
     const cleaned = content.text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const parsed = JSON.parse(cleaned);
-    const cafes: BlogCafe[] = (parsed.cafes || []).map((c: Record<string, unknown>) => ({
+    return (parsed.cafes || []).map((c: Record<string, unknown>) => ({
       name: typeof c.name === 'string' ? c.name : 'Unknown',
       address: null,
       wifi_notes: typeof c.wifi_notes === 'string' ? c.wifi_notes : null,
@@ -124,12 +154,45 @@ wifi_notes, laptop_notes, seating_notes should be null if not explicitly mention
       seating_notes: typeof c.seating_notes === 'string' ? c.seating_notes : null,
       source_url: typeof c.source_url === 'string' ? c.source_url : null,
     }));
-
-    const elapsed = Date.now() - startTime;
-    console.log(`[Search Blogs] Found ${cafes.length} cafés in ${elapsed}ms: ${cafes.map(c => c.name).join(', ')}`);
-    return Response.json({ cafes });
   } catch (e) {
-    console.error('[Search Blogs] Error:', e);
-    return Response.json({ cafes: [] });
+    console.error('[Search Blogs] Positive extraction error:', e);
+    return [];
+  }
+}
+
+async function extractNegativeCafes(results: BraveResult[], city: string): Promise<NegativeCafe[]> {
+  if (results.length === 0) return [];
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      system: 'You extract café names mentioned negatively for remote work. Return ONLY valid JSON with no markdown fences or explanation.',
+      messages: [{
+        role: 'user',
+        content: `From these search results, extract any specific cafés in ${city} that are mentioned NEGATIVELY for working — e.g. no wifi, no laptops allowed, time limits on staying, asked to leave, bad for remote work. For each café found, note the specific complaint.
+
+Only include cafés with SPECIFIC NAMES and SPECIFIC complaints. Do not make up names.
+
+Search results:
+${buildSearchContext(results)}
+
+Return ONLY valid JSON:
+{ "negative_cafes": [{ "name": "...", "issue": "..." }] }`,
+      }],
+    });
+
+    const content = response.content[0];
+    if (content.type !== 'text') return [];
+
+    const cleaned = content.text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+    return (parsed.negative_cafes || []).map((c: Record<string, unknown>) => ({
+      name: typeof c.name === 'string' ? c.name : 'Unknown',
+      issue: typeof c.issue === 'string' ? c.issue : 'unknown issue',
+    }));
+  } catch (e) {
+    console.error('[Search Blogs] Negative extraction error:', e);
+    return [];
   }
 }

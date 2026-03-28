@@ -53,7 +53,17 @@ function blogHasExplicitWorkMention(bc: BlogCafe): boolean {
   return workKeywords.some(kw => notes.includes(kw));
 }
 
-async function searchBlogs(city: string, origin: string): Promise<BlogCafe[]> {
+interface NegativeCafe {
+  name: string;
+  issue: string;
+}
+
+interface BlogSearchResult {
+  cafes: BlogCafe[];
+  negative_cafes: NegativeCafe[];
+}
+
+async function searchBlogs(city: string, origin: string): Promise<BlogSearchResult> {
   console.log('[Pipeline] searchBlogs() called for city:', city, 'origin:', origin);
   try {
     const url = `${origin}/api/search-blogs`;
@@ -67,14 +77,17 @@ async function searchBlogs(city: string, origin: string): Promise<BlogCafe[]> {
     if (!res.ok) {
       const text = await res.text();
       console.error('[Pipeline] Blog search HTTP error:', res.status, text.substring(0, 200));
-      return [];
+      return { cafes: [], negative_cafes: [] };
     }
     const data = await res.json();
-    console.log('[Pipeline] Blog search returned:', data.cafes?.length ?? 0, 'cafés');
-    return data.cafes || [];
+    console.log('[Pipeline] Blog search returned:', data.cafes?.length ?? 0, 'positive cafés,', data.negative_cafes?.length ?? 0, 'negative cafés');
+    return {
+      cafes: data.cafes || [],
+      negative_cafes: data.negative_cafes || [],
+    };
   } catch (e) {
     console.error('[Pipeline] Blog search EXCEPTION:', e);
-    return [];
+    return { cafes: [], negative_cafes: [] };
   }
 }
 
@@ -141,7 +154,8 @@ async function enrichWithReviews(
   reviews: string[],
   types: string[],
   blogNotes: BlogCafe | null,
-  isBlogResult: boolean
+  isBlogResult: boolean,
+  negativeIssue: string | null
 ): Promise<{
   laptop_allowed: boolean | null;
   wifi_rating: number | null;
@@ -177,6 +191,10 @@ async function enrichWithReviews(
     ? '\nIMPORTANT: This café was found in a blog search for "best cafés to work from". This is strong evidence it is laptop-friendly. Set laptop_allowed=true unless reviews explicitly contradict this.'
     : '';
 
+  const negativeContext = negativeIssue
+    ? `\nWARNING: This café has been flagged negatively online: "${negativeIssue}". Weight this heavily — if reviews also suggest it is unfriendly for work, set laptop_allowed=false.`
+    : '';
+
   try {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
@@ -208,7 +226,7 @@ CONFIDENCE: 'inferred' if laptop_allowed is true or false. 'unconfirmed' if null
 REASON: Brief explanation of your laptop_allowed decision.
 
 Reviews: ${JSON.stringify(reviews)}
-Place types: ${JSON.stringify(types)}${blogContext}${blogResultContext}
+Place types: ${JSON.stringify(types)}${blogContext}${blogResultContext}${negativeContext}
 
 Return JSON: { "laptop_allowed": ..., "wifi_rating": ..., "seating_rating": ..., "work_summary": "...", "confidence": "...", "reason": "..." }`,
       }],
@@ -296,24 +314,27 @@ export async function POST(request: Request) {
         send({ type: 'status', message: `📰 Searching blogs for best work cafés in ${city}...` });
         console.log('[Pipeline] Starting blog search + nearby search in parallel for:', city);
 
-        const [blogCafes, nearbyPlaces] = await Promise.all([
+        const [blogSearchResult, nearbyPlaces] = await Promise.all([
           searchBlogs(city, origin),
           googleNearbySearch(lat, lng),
         ]);
 
+        const blogCafes = blogSearchResult.cafes;
+        const negativeCafes = blogSearchResult.negative_cafes;
+
         // Filter blog cafés to only those with explicit work mentions
         const workBlogCafes = blogCafes.filter(blogHasExplicitWorkMention);
-        const nonWorkBlogCafes = blogCafes.filter(bc => !blogHasExplicitWorkMention(bc));
+        const nonWorkBlogCafes = blogCafes.filter((bc: BlogCafe) => !blogHasExplicitWorkMention(bc));
 
-        console.log(`[Pipeline] Blog search: found ${workBlogCafes.length} cafés with explicit work mentions: ${workBlogCafes.map(c => c.name).join(', ')}`);
-        console.log(`[Pipeline] Blog cafés found: ${blogCafes.map(c => c.name).join(', ') || 'none'}`);
+        console.log(`[Pipeline] Blog search: found ${workBlogCafes.length} cafés with explicit work mentions: ${workBlogCafes.map((c: BlogCafe) => c.name).join(', ')}`);
+        console.log(`[Pipeline] Blog cafés found: ${blogCafes.map((c: BlogCafe) => c.name).join(', ') || 'none'}`);
         if (nonWorkBlogCafes.length > 0) {
-          console.log(`[Pipeline] Blog search: ${nonWorkBlogCafes.length} cafés without work mentions (ignored for laptop inference): ${nonWorkBlogCafes.map(c => c.name).join(', ')}`);
+          console.log(`[Pipeline] Blog search: ${nonWorkBlogCafes.length} cafés without work mentions: ${nonWorkBlogCafes.map((c: BlogCafe) => c.name).join(', ')}`);
+        }
+        if (negativeCafes.length > 0) {
+          console.log(`[Pipeline] Negative cafés found: ${negativeCafes.map((c: NegativeCafe) => `${c.name} (${c.issue})`).join(', ')}`);
         }
         console.log('[Pipeline] Nearby search found:', nearbyPlaces.length, 'places');
-
-        // Blog café lists for fuzzy matching later
-        // (no Map/Set — we use namesMatch() for lookup)
 
         // Google Text Search for blog-mentioned cafés
         send({ type: 'status', message: `⭐ Looking up Google ratings...` });
@@ -367,6 +388,7 @@ export async function POST(request: Request) {
           existing: Record<string, unknown> | undefined;
           blogNotes: BlogCafe | null;
           isWorkMentioned: boolean;
+          negativeIssue: string | null;
           skipEnrichment: boolean;
           reviewTexts: string[];
         }
@@ -382,11 +404,19 @@ export async function POST(request: Request) {
             .map(r => r.text?.text)
             .filter((t): t is string => !!t);
 
+          const placeName = place.displayName?.text || '';
+          const negMatch = negativeCafes.find((nc: NegativeCafe) => namesMatch(nc.name, placeName));
+
+          if (negMatch) {
+            console.log(`[Pipeline] ${placeName}: NEGATIVE FLAG — ${negMatch.issue}`);
+          }
+
           return {
             place,
             existing,
-            blogNotes: blogCafes.find(bc => namesMatch(bc.name, place.displayName?.text || '')) || null,
-            isWorkMentioned: workBlogCafes.some(bc => namesMatch(bc.name, place.displayName?.text || '')),
+            blogNotes: blogCafes.find(bc => namesMatch(bc.name, placeName)) || null,
+            isWorkMentioned: workBlogCafes.some(bc => namesMatch(bc.name, placeName)),
+            negativeIssue: negMatch?.issue || null,
             skipEnrichment: !!existingIsFresh,
             reviewTexts,
           };
@@ -411,6 +441,7 @@ export async function POST(request: Request) {
               w.place.types || [],
               w.blogNotes,
               w.isWorkMentioned,
+              w.negativeIssue,
             ))
           );
           for (let j = 0; j < batch.length; j++) {
