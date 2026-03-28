@@ -1,22 +1,6 @@
-import Anthropic from '@anthropic-ai/sdk';
-
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY!;
 const BRAVE_SEARCH_API_KEY = process.env.BRAVE_SEARCH_API_KEY!;
-const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
-export interface BlogCafe {
-  name: string;
-  address: string | null;
-  wifi_notes: string | null;
-  laptop_notes: string | null;
-  seating_notes: string | null;
-  source_url: string | null;
-}
-
-export interface NegativeCafe {
-  name: string;
-  issue: string;
-}
+const WORK_KEYWORDS = ['work', 'coworking', 'laptop', 'wifi', 'wi-fi', 'telework', 'nomad', 'remote work', 'study', 'freelanc', 'digital nomad', 'outlet', 'plug'];
 
 interface BraveResult {
   title: string;
@@ -52,17 +36,15 @@ async function braveSearch(query: string): Promise<BraveResult[]> {
   }
 }
 
-function deduplicateByUrl(results: BraveResult[]): BraveResult[] {
-  const seen = new Set<string>();
-  return results.filter(r => {
-    if (seen.has(r.url)) return false;
-    seen.add(r.url);
-    return true;
-  });
+function snippetHasWorkKeyword(text: string): boolean {
+  const lower = text.toLowerCase();
+  return WORK_KEYWORDS.some(kw => lower.includes(kw));
 }
 
-function buildSearchContext(results: BraveResult[]): string {
-  return results.map((r, i) => `[Result ${i + 1}] URL: ${r.url}\nTitle: ${r.title}\nSnippet: ${r.description}`).join('\n\n');
+export interface BlogSnippet {
+  title: string;
+  snippet: string;
+  url: string;
 }
 
 export async function POST(request: Request) {
@@ -76,7 +58,7 @@ export async function POST(request: Request) {
   const startTime = Date.now();
 
   try {
-    // 5 parallel Brave Search queries — 3 positive, 2 negative/reddit
+    // 5 parallel Brave Search queries
     const [results1, results2, results3, results4, results5] = await Promise.all([
       braveSearch(`best cafes to work from in ${city}`),
       braveSearch(`best coworking cafes ${city}`),
@@ -85,114 +67,27 @@ export async function POST(request: Request) {
       braveSearch(`site:reddit.com "${city}" cafe laptop wifi working`),
     ]);
 
-    // Positive results (queries 1-4 + reddit)
-    const positiveResults = deduplicateByUrl([...results1, ...results2, ...results3, ...results4, ...results5]);
-    // Negative results (reddit can have both positive and negative)
-    const negativeResults = deduplicateByUrl([...results5]);
+    const allResults = [...results1, ...results2, ...results3, ...results4, ...results5];
 
-    console.log('[Search Blogs] Positive results:', positiveResults.length, '| Negative results:', negativeResults.length);
+    // Deduplicate by URL
+    const seen = new Set<string>();
+    const unique = allResults.filter(r => {
+      if (seen.has(r.url)) return false;
+      seen.add(r.url);
+      return true;
+    });
 
-    // Extract positive cafés and negative cafés in parallel with Claude
-    const [cafes, negativeCafes] = await Promise.all([
-      extractPositiveCafes(positiveResults, city),
-      extractNegativeCafes(negativeResults, city),
-    ]);
+    // Filter to snippets that contain work keywords
+    const workSnippets: BlogSnippet[] = unique
+      .filter(r => snippetHasWorkKeyword(r.title + ' ' + r.description))
+      .map(r => ({ title: r.title, snippet: r.description, url: r.url }));
 
     const elapsed = Date.now() - startTime;
-    console.log(`[Search Blogs] Found ${cafes.length} positive cafés in ${elapsed}ms: ${cafes.map(c => c.name).join(', ')}`);
-    if (negativeCafes.length > 0) {
-      console.log(`[Search Blogs] Found ${negativeCafes.length} negative cafés: ${negativeCafes.map(c => `${c.name} (${c.issue})`).join(', ')}`);
-    }
+    console.log(`[Search Blogs] ${workSnippets.length} work-related snippets from ${unique.length} unique results in ${elapsed}ms`);
 
-    return Response.json({ cafes, negative_cafes: negativeCafes });
+    return Response.json({ snippets: workSnippets });
   } catch (e) {
     console.error('[Search Blogs] Error:', e);
-    return Response.json({ cafes: [], negative_cafes: [] });
-  }
-}
-
-async function extractPositiveCafes(results: BraveResult[], city: string): Promise<BlogCafe[]> {
-  if (results.length === 0) return [];
-
-  try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
-      system: 'You extract café names from search results. Return ONLY valid JSON with no markdown fences or explanation.',
-      messages: [{
-        role: 'user',
-        content: `From these search results about cafes in ${city}, extract a list of specific cafe names that are mentioned as good for working, laptops, or remote work. For each cafe found, note any explicit mentions of wifi quality, laptop policy, or seating.
-
-RULES:
-- Only include cafés with SPECIFIC NAMES mentioned in the results. Do not make up names.
-- If a result just says "best cafes" but doesn't name specific cafés, skip it.
-- source_url: Only assign a source_url to a café if that specific URL's content explicitly mentions that café by name. Do not assign a URL from one article to a café mentioned in a different article. If you cannot confidently attribute a URL to a specific café, set source_url to null.
-- wifi_notes, laptop_notes, seating_notes: set to null if not explicitly mentioned in the same result that names the café.
-
-Each search result below has a URL, title, and snippet. Match café names to the specific result that mentions them.
-
-Search results:
-${buildSearchContext(results)}
-
-Return ONLY valid JSON:
-{ "cafes": [{ "name": "...", "wifi_notes": "...", "laptop_notes": "...", "seating_notes": "...", "source_url": "..." }] }
-
-Return up to 15 cafés.`,
-      }],
-    });
-
-    const content = response.content[0];
-    if (content.type !== 'text') return [];
-
-    const cleaned = content.text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    const parsed = JSON.parse(cleaned);
-    return (parsed.cafes || []).map((c: Record<string, unknown>) => ({
-      name: typeof c.name === 'string' ? c.name : 'Unknown',
-      address: null,
-      wifi_notes: typeof c.wifi_notes === 'string' ? c.wifi_notes : null,
-      laptop_notes: typeof c.laptop_notes === 'string' ? c.laptop_notes : null,
-      seating_notes: typeof c.seating_notes === 'string' ? c.seating_notes : null,
-      source_url: typeof c.source_url === 'string' ? c.source_url : null,
-    }));
-  } catch (e) {
-    console.error('[Search Blogs] Positive extraction error:', e);
-    return [];
-  }
-}
-
-async function extractNegativeCafes(results: BraveResult[], city: string): Promise<NegativeCafe[]> {
-  if (results.length === 0) return [];
-
-  try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      system: 'You extract café names mentioned negatively for remote work. Return ONLY valid JSON with no markdown fences or explanation.',
-      messages: [{
-        role: 'user',
-        content: `From these search results, extract any specific cafés in ${city} that are mentioned NEGATIVELY for working — e.g. no wifi, no laptops allowed, time limits on staying, asked to leave, bad for remote work. For each café found, note the specific complaint.
-
-Only include cafés with SPECIFIC NAMES and SPECIFIC complaints. Do not make up names.
-
-Search results:
-${buildSearchContext(results)}
-
-Return ONLY valid JSON:
-{ "negative_cafes": [{ "name": "...", "issue": "..." }] }`,
-      }],
-    });
-
-    const content = response.content[0];
-    if (content.type !== 'text') return [];
-
-    const cleaned = content.text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    const parsed = JSON.parse(cleaned);
-    return (parsed.negative_cafes || []).map((c: Record<string, unknown>) => ({
-      name: typeof c.name === 'string' ? c.name : 'Unknown',
-      issue: typeof c.issue === 'string' ? c.issue : 'unknown issue',
-    }));
-  } catch (e) {
-    console.error('[Search Blogs] Negative extraction error:', e);
-    return [];
+    return Response.json({ snippets: [] });
   }
 }

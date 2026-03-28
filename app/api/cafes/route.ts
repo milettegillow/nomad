@@ -25,69 +25,30 @@ async function reverseGeocode(lat: number, lng: number): Promise<string | null> 
   }
 }
 
-interface BlogCafe {
-  name: string;
-  address: string | null;
-  wifi_notes: string | null;
-  laptop_notes: string | null;
-  seating_notes: string | null;
-  source_url: string | null;
+interface BlogSnippet {
+  title: string;
+  snippet: string;
+  url: string;
 }
 
-function normalizeName(s: string): string {
-  return s.toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9\s]/g, '').trim();
-}
-
-function namesMatch(a: string, b: string): boolean {
-  const na = normalizeName(a);
-  const nb = normalizeName(b);
-  return na.includes(nb) || nb.includes(na) ||
-    na.split(' ').some(word => word.length > 3 && nb.includes(word));
-}
-
-function blogHasExplicitWorkMention(bc: BlogCafe): boolean {
-  const notes = [bc.laptop_notes, bc.wifi_notes].filter(Boolean).join(' ').toLowerCase();
-  const workKeywords = ['laptop', 'remote work', 'coworking', 'work from', 'study', 'freelanc', 'digital nomad', 'wifi', 'outlets', 'plug'];
-  return workKeywords.some(kw => notes.includes(kw));
-}
-
-interface NegativeCafe {
-  name: string;
-  issue: string;
-}
-
-interface BlogSearchResult {
-  cafes: BlogCafe[];
-  negative_cafes: NegativeCafe[];
-}
-
-async function searchBlogs(city: string, origin: string): Promise<BlogSearchResult> {
-  console.log('[Pipeline] searchBlogs() called for city:', city, 'origin:', origin);
+async function searchBlogs(city: string, origin: string): Promise<BlogSnippet[]> {
+  console.log('[Pipeline] searchBlogs() called for city:', city);
   try {
-    const url = `${origin}/api/search-blogs`;
-    console.log('[Pipeline] Fetching blog search at:', url);
-    const res = await fetch(url, {
+    const res = await fetch(`${origin}/api/search-blogs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ city }),
     });
-    console.log('[Pipeline] Blog search response status:', res.status);
     if (!res.ok) {
-      const text = await res.text();
-      console.error('[Pipeline] Blog search HTTP error:', res.status, text.substring(0, 200));
-      return { cafes: [], negative_cafes: [] };
+      console.error('[Pipeline] Blog search HTTP error:', res.status);
+      return [];
     }
     const data = await res.json();
-    console.log('[Pipeline] Blog search returned:', data.cafes?.length ?? 0, 'positive cafés,', data.negative_cafes?.length ?? 0, 'negative cafés');
-    return {
-      cafes: data.cafes || [],
-      negative_cafes: data.negative_cafes || [],
-    };
+    console.log('[Pipeline] Blog search returned:', data.snippets?.length ?? 0, 'work-related snippets');
+    return data.snippets || [];
   } catch (e) {
     console.error('[Pipeline] Blog search EXCEPTION:', e);
-    return { cafes: [], negative_cafes: [] };
+    return [];
   }
 }
 
@@ -99,30 +60,6 @@ interface GooglePlace {
   rating?: number;
   reviews?: { text?: { text: string } }[];
   types?: string[];
-}
-
-async function googleTextSearch(query: string, lat: number, lng: number): Promise<GooglePlace[]> {
-  try {
-    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': GOOGLE_PLACES_API_KEY,
-        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.reviews,places.types',
-      },
-      body: JSON.stringify({
-        textQuery: query,
-        locationBias: {
-          circle: { center: { latitude: lat, longitude: lng }, radius: 5000 },
-        },
-        maxResultCount: 5,
-      }),
-    });
-    const data = await res.json();
-    return data.places || [];
-  } catch {
-    return [];
-  }
 }
 
 async function googleNearbySearch(lat: number, lng: number): Promise<GooglePlace[]> {
@@ -153,46 +90,22 @@ async function enrichWithReviews(
   cafeName: string,
   reviews: string[],
   types: string[],
-  blogNotes: BlogCafe | null,
-  isBlogResult: boolean,
-  negativeIssue: string | null
+  blogContext: string
 ): Promise<{
   laptop_allowed: boolean | null;
   wifi_rating: number | null;
   seating_rating: number | null;
-  work_summary: string | null;
   confidence: 'inferred' | 'unconfirmed';
   reason: string;
 }> {
-  // Blog results are automatically laptop-friendly — they were found in "best work cafés" lists
-  if (isBlogResult && reviews.length < MIN_REVIEWS_FOR_CLAUDE) {
-    const summary = blogNotes
-      ? [blogNotes.laptop_notes, blogNotes.wifi_notes].filter(Boolean).join('. ') || 'Recommended for remote work in blog articles'
-      : 'Recommended for remote work in blog articles';
-    return {
-      laptop_allowed: true,
-      wifi_rating: blogNotes?.wifi_notes ? 3 : null,
-      seating_rating: blogNotes?.seating_notes ? 3 : null,
-      work_summary: summary,
-      confidence: 'inferred',
-      reason: 'found in work-friendly café blog list',
-    };
+  const fallback = { laptop_allowed: null, wifi_rating: null, seating_rating: null, confidence: 'unconfirmed' as const, reason: 'no data' };
+
+  if (reviews.length < MIN_REVIEWS_FOR_CLAUDE && !blogContext) {
+    return fallback;
   }
 
-  const fallback = { laptop_allowed: null, wifi_rating: null, seating_rating: null, work_summary: null, confidence: 'unconfirmed' as const, reason: 'no data' };
-
-  const hasBlogNotes = blogNotes && (blogNotes.wifi_notes || blogNotes.laptop_notes || blogNotes.seating_notes);
-
-  const blogContext = hasBlogNotes
-    ? `\nBlog/article notes about this café:\n- Laptops: ${blogNotes!.laptop_notes || 'not mentioned'}\n- WiFi: ${blogNotes!.wifi_notes || 'not mentioned'}\n- Seating: ${blogNotes!.seating_notes || 'not mentioned'}\nThese blog notes are strong evidence — use them.`
-    : '';
-
-  const blogResultContext = isBlogResult
-    ? '\nIMPORTANT: This café was found in a blog search for "best cafés to work from". This is strong evidence it is laptop-friendly. Set laptop_allowed=true unless reviews explicitly contradict this.'
-    : '';
-
-  const negativeContext = negativeIssue
-    ? `\nWARNING: This café has been flagged negatively online: "${negativeIssue}". Weight this heavily — if reviews also suggest it is unfriendly for work, set laptop_allowed=false.`
+  const blogSection = blogContext
+    ? `\nHere are raw search snippets mentioning this area. Only use these if they explicitly name this specific café "${cafeName}":\n${blogContext}`
     : '';
 
   try {
@@ -205,7 +118,7 @@ async function enrichWithReviews(
         content: `Analyze these reviews for "${cafeName}".
 
 LAPTOP_ALLOWED:
-- true if reviews mention ANY of: "work", "study", "laptop", "wifi", "quiet", "coworking", "nomad", "remote", "productive", "good atmosphere to work", "freelancer", "outlet", "plug", or if people seem to spend long periods there.
+- true if reviews mention ANY of: "work", "study", "laptop", "wifi", "quiet", "coworking", "nomad", "remote", "productive", "freelancer", "outlet", "plug", or if people seem to spend long periods there.
 - false ONLY if reviews explicitly say: "no wifi", "no laptops", "asked to leave", "time limit", "too noisy to work", "not suitable for work".
 - null only if reviews contain absolutely nothing about the work environment.
 
@@ -221,14 +134,13 @@ SEATING_RATING:
 - 1-2 if reviews mention "small", "few seats", "cramped", "tiny"
 - null only if seating/space is not mentioned
 
-WORK_SUMMARY: One sentence describing work-friendliness. Be specific about what was mentioned.
 CONFIDENCE: 'inferred' if laptop_allowed is true or false. 'unconfirmed' if null.
 REASON: Brief explanation of your laptop_allowed decision.
 
 Reviews: ${JSON.stringify(reviews)}
-Place types: ${JSON.stringify(types)}${blogContext}${blogResultContext}${negativeContext}
+Place types: ${JSON.stringify(types)}${blogSection}
 
-Return JSON: { "laptop_allowed": ..., "wifi_rating": ..., "seating_rating": ..., "work_summary": "...", "confidence": "...", "reason": "..." }`,
+Return JSON: { "laptop_allowed": ..., "wifi_rating": ..., "seating_rating": ..., "confidence": "...", "reason": "..." }`,
       }],
     });
 
@@ -241,16 +153,11 @@ Return JSON: { "laptop_allowed": ..., "wifi_rating": ..., "seating_rating": ...,
       laptop_allowed: typeof parsed.laptop_allowed === 'boolean' ? parsed.laptop_allowed : null,
       wifi_rating: typeof parsed.wifi_rating === 'number' && parsed.wifi_rating >= 1 && parsed.wifi_rating <= 5 ? parsed.wifi_rating : null,
       seating_rating: typeof parsed.seating_rating === 'number' && parsed.seating_rating >= 1 && parsed.seating_rating <= 5 ? parsed.seating_rating : null,
-      work_summary: typeof parsed.work_summary === 'string' ? parsed.work_summary : null,
       confidence: parsed.confidence === 'inferred' ? 'inferred' : 'unconfirmed',
       reason: typeof parsed.reason === 'string' ? parsed.reason : 'unknown',
     };
   } catch (e) {
     console.error('[Pipeline] Review enrichment error for', cafeName, ':', e);
-    // If it's a blog result and Claude failed, still mark as laptop-friendly
-    if (isBlogResult) {
-      return { laptop_allowed: true, wifi_rating: null, seating_rating: null, work_summary: 'Recommended for remote work in blog articles', confidence: 'inferred', reason: 'blog result (Claude failed)' };
-    }
     return fallback;
   }
 }
@@ -310,48 +217,28 @@ export async function POST(request: Request) {
         // First user in this city!
         send({ type: 'first_search', city });
 
-        // STEP 2 & 3: Blog search + Google Nearby in PARALLEL
+        // STEP 2: Blog search + Google Nearby in PARALLEL
         send({ type: 'status', message: `📰 Searching blogs for best work cafés in ${city}...` });
         console.log('[Pipeline] Starting blog search + nearby search in parallel for:', city);
 
-        const [blogSearchResult, nearbyPlaces] = await Promise.all([
+        const [blogSnippets, nearbyPlaces] = await Promise.all([
           searchBlogs(city, origin),
           googleNearbySearch(lat, lng),
         ]);
 
-        const blogCafes = blogSearchResult.cafes;
-        const negativeCafes = blogSearchResult.negative_cafes;
+        console.log('[Pipeline] Blog snippets:', blogSnippets.length, '| Nearby places:', nearbyPlaces.length);
 
-        // Filter blog cafés to only those with explicit work mentions
-        const workBlogCafes = blogCafes.filter(blogHasExplicitWorkMention);
-        const nonWorkBlogCafes = blogCafes.filter((bc: BlogCafe) => !blogHasExplicitWorkMention(bc));
+        // Build a single blog context string from all snippets
+        const blogContextText = blogSnippets.length > 0
+          ? blogSnippets.map(s => `${s.title}: ${s.snippet}`).join('\n')
+          : '';
 
-        console.log(`[Pipeline] Blog search: found ${workBlogCafes.length} cafés with explicit work mentions: ${workBlogCafes.map((c: BlogCafe) => c.name).join(', ')}`);
-        console.log(`[Pipeline] Blog cafés found: ${blogCafes.map((c: BlogCafe) => c.name).join(', ') || 'none'}`);
-        if (nonWorkBlogCafes.length > 0) {
-          console.log(`[Pipeline] Blog search: ${nonWorkBlogCafes.length} cafés without work mentions: ${nonWorkBlogCafes.map((c: BlogCafe) => c.name).join(', ')}`);
-        }
-        if (negativeCafes.length > 0) {
-          console.log(`[Pipeline] Negative cafés found: ${negativeCafes.map((c: NegativeCafe) => `${c.name} (${c.issue})`).join(', ')}`);
-        }
-        console.log('[Pipeline] Nearby search found:', nearbyPlaces.length, 'places');
-
-        // Google Text Search for blog-mentioned cafés
+        // STEP 3: Google Places
         send({ type: 'status', message: `⭐ Looking up Google ratings...` });
 
-        const blogPlaces: GooglePlace[] = [];
-        const batchSize = 3;
-        for (let i = 0; i < blogCafes.length; i += batchSize) {
-          const batch = blogCafes.slice(i, i + batchSize);
-          const results = await Promise.all(
-            batch.map(bc => googleTextSearch(`${bc.name} cafe ${city}`, lat, lng))
-          );
-          for (const r of results) blogPlaces.push(...r);
-        }
-
-        // Deduplicate by place_id, blog places first
+        // Deduplicate nearby places by ID
         const allPlacesMap = new Map<string, GooglePlace>();
-        for (const p of [...blogPlaces, ...nearbyPlaces]) {
+        for (const p of nearbyPlaces) {
           if (p.id && !allPlacesMap.has(p.id)) allPlacesMap.set(p.id, p);
         }
         const allPlaces = Array.from(allPlacesMap.values());
@@ -379,16 +266,12 @@ export async function POST(request: Request) {
           }
         }
 
-        // STEP 4: Determine which cafés need enrichment
+        // STEP 4: Enrichment
         send({ type: 'status', message: `🤖 Analysing Google reviews...` });
 
-        // Separate into: skip (fresh), enrich-with-claude (3+ reviews), enrich-blog-only, no-data
         interface CafeWorkItem {
           place: GooglePlace;
           existing: Record<string, unknown> | undefined;
-          blogNotes: BlogCafe | null;
-          isWorkMentioned: boolean;
-          negativeIssue: string | null;
           skipEnrichment: boolean;
           reviewTexts: string[];
         }
@@ -404,44 +287,34 @@ export async function POST(request: Request) {
             .map(r => r.text?.text)
             .filter((t): t is string => !!t);
 
-          const placeName = place.displayName?.text || '';
-          const negMatch = negativeCafes.find((nc: NegativeCafe) => namesMatch(nc.name, placeName));
-
-          if (negMatch) {
-            console.log(`[Pipeline] ${placeName}: NEGATIVE FLAG — ${negMatch.issue}`);
-          }
-
           return {
             place,
             existing,
-            blogNotes: blogCafes.find(bc => namesMatch(bc.name, placeName)) || null,
-            isWorkMentioned: workBlogCafes.some(bc => namesMatch(bc.name, placeName)),
-            negativeIssue: negMatch?.issue || null,
             skipEnrichment: !!existingIsFresh,
             reviewTexts,
           };
         });
 
         const toSkip = workItems.filter(w => w.skipEnrichment);
-        const toEnrichWithClaude = workItems
-          .filter(w => !w.skipEnrichment && (w.reviewTexts.length >= MIN_REVIEWS_FOR_CLAUDE || w.blogNotes))
+        const toEnrich = workItems
+          .filter(w => !w.skipEnrichment && (w.reviewTexts.length >= MIN_REVIEWS_FOR_CLAUDE || blogContextText))
           .slice(0, MAX_CLAUDE_CALLS);
-        const noClaudeItems = workItems.filter(w => !w.skipEnrichment && w.reviewTexts.length < MIN_REVIEWS_FOR_CLAUDE && !w.blogNotes);
+        const noEnrich = workItems.filter(w =>
+          !w.skipEnrichment && w.reviewTexts.length < MIN_REVIEWS_FOR_CLAUDE && !blogContextText
+        );
 
-        console.log(`[Pipeline] Enriching ${toEnrichWithClaude.length} cafés, skipping ${toSkip.length} (already enriched), ${noClaudeItems.length} with <${MIN_REVIEWS_FOR_CLAUDE} reviews (left unconfirmed)`);
+        console.log(`[Pipeline] Enriching ${toEnrich.length} cafés, skipping ${toSkip.length} (cached), ${noEnrich.length} with <${MIN_REVIEWS_FOR_CLAUDE} reviews (unconfirmed)`);
 
-        // Run Claude enrichment in batches of ENRICHMENT_BATCH_SIZE
+        // Run Claude enrichment in batches
         const claudeResults = new Map<string, Awaited<ReturnType<typeof enrichWithReviews>>>();
-        for (let i = 0; i < toEnrichWithClaude.length; i += ENRICHMENT_BATCH_SIZE) {
-          const batch = toEnrichWithClaude.slice(i, i + ENRICHMENT_BATCH_SIZE);
+        for (let i = 0; i < toEnrich.length; i += ENRICHMENT_BATCH_SIZE) {
+          const batch = toEnrich.slice(i, i + ENRICHMENT_BATCH_SIZE);
           const results = await Promise.all(
             batch.map(w => enrichWithReviews(
               w.place.displayName?.text || 'Unknown',
               w.reviewTexts,
               w.place.types || [],
-              w.blogNotes,
-              w.isWorkMentioned,
-              w.negativeIssue,
+              blogContextText,
             ))
           );
           for (let j = 0; j < batch.length; j++) {
@@ -456,17 +329,14 @@ export async function POST(request: Request) {
           let wifi_rating: number | null = null;
           let seating_rating: number | null = null;
           let confidence: string = 'unconfirmed';
-          let workSummary: string | null = null;
           let reason = 'no data';
 
           if (w.skipEnrichment && w.existing) {
-            // Use existing fresh data as-is
             laptop_allowed = w.existing.laptop_allowed as boolean | null;
             wifi_rating = w.existing.wifi_rating as number | null;
             seating_rating = w.existing.seating_rating as number | null;
             confidence = w.existing.confidence as string;
-            workSummary = w.existing.work_summary as string | null;
-            reason = 'cached';
+            reason = (w.existing.enrichment_reason as string) || 'cached';
           } else {
             const claudeResult = claudeResults.get(w.place.id);
 
@@ -475,16 +345,7 @@ export async function POST(request: Request) {
               wifi_rating = claudeResult.wifi_rating;
               seating_rating = claudeResult.seating_rating;
               confidence = claudeResult.confidence;
-              workSummary = claudeResult.work_summary;
               reason = claudeResult.reason;
-            }
-
-            // Blog result: set laptop_allowed=true if Claude didn't already determine it
-            if (w.isWorkMentioned && laptop_allowed === null) {
-              laptop_allowed = true;
-              confidence = 'inferred';
-              reason = 'found in work-friendly café blog list';
-              if (!workSummary) workSummary = 'Recommended for remote work in blog articles';
             }
 
             // Preserve non-null fields from existing stale data
@@ -501,28 +362,11 @@ export async function POST(request: Request) {
               if (w.existing.confidence === 'verified') {
                 confidence = 'verified';
               }
-              if (!workSummary && w.existing.work_summary) {
-                workSummary = w.existing.work_summary as string;
-              }
             }
-
-            // Build work_summary from blog notes if still null
-            if (!workSummary && w.blogNotes) {
-              const parts: string[] = [];
-              if (w.blogNotes.laptop_notes) parts.push(w.blogNotes.laptop_notes);
-              if (w.blogNotes.wifi_notes) parts.push(w.blogNotes.wifi_notes);
-              if (parts.length > 0) workSummary = parts.join('. ');
-            }
-          }
-
-          // Use existing reason if cached
-          if (w.skipEnrichment && w.existing?.enrichment_reason) {
-            reason = w.existing.enrichment_reason as string;
           }
 
           console.log(`[Pipeline] ${placeName}: laptop=${laptop_allowed} wifi=${wifi_rating} confidence=${confidence}`);
           console.log(`[Pipeline] ${placeName} reason: ${reason}`);
-          console.log(`[Pipeline] ${placeName} was in blog results: ${w.isWorkMentioned}`);
 
           return {
             name: placeName,
@@ -538,8 +382,8 @@ export async function POST(request: Request) {
             foursquare_rating: null as number | null,
             confidence,
             last_updated: new Date().toISOString(),
-            blog_sources: w.blogNotes?.source_url ? [w.blogNotes.source_url] : (w.existing?.blog_sources as string[] | null) || null,
-            work_summary: workSummary,
+            blog_sources: null as string[] | null,
+            work_summary: null as string | null,
             enrichment_reason: reason,
           };
         });
