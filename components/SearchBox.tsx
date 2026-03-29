@@ -137,11 +137,7 @@ export default function SearchBox({
     <div ref={containerRef} className="relative" style={{ width: 400 }}>
       <div className="relative" style={{ boxShadow: '0 2px 6px rgba(0,0,0,0.3)', borderRadius: 8, border }}>
         <div className="absolute top-1/2 -translate-y-1/2" style={{ left: 12, color: iconColor }}>
-          {loading ? (
-            <div className={`w-5 h-5 border-2 ${spinnerBorder} rounded-full animate-spin`} />
-          ) : (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-          )}
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
         </div>
         <input
           type="text"

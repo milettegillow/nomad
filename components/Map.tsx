@@ -130,6 +130,8 @@ export default function Map() {
   const [showSearchArea, setShowSearchArea] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [firstSearchCity, setFirstSearchCity] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
+  const progressInterval = useRef<ReturnType<typeof setInterval>>(undefined);
   const [locationState, setLocationState] = useState<
     "pending" | "locating" | "granted" | "failed"
   >("pending");
@@ -254,19 +256,33 @@ export default function Map() {
             if (!line.startsWith("data: ")) continue;
             try {
               const event = JSON.parse(line.slice(6));
-              if (event.type === "first_search")
+              if (event.type === "first_search") {
                 setFirstSearchCity(event.city as string);
-              else if (event.type === "status") setStatusMessage(event.message);
-              else if (event.type === "cafes") {
+                setProgress(0);
+                clearInterval(progressInterval.current);
+                progressInterval.current = setInterval(() => {
+                  setProgress(prev => {
+                    if (prev >= 92) return 92;
+                    const factor = Math.pow(1 - prev / 100, 2);
+                    const increment = (Math.random() * 2 + 0.5) * factor;
+                    return Math.min(prev + increment, 92);
+                  });
+                }, 200);
+              } else if (event.type === "status") {
+                setStatusMessage(event.message);
+              } else if (event.type === "cafes") {
+                clearInterval(progressInterval.current);
+                setProgress(100);
                 setFirstSearchCity(null);
                 updateCafes(event.cafes as Cafe[], true);
                 lastSearchCenter.current = { lat, lng };
                 hasInitialSearch.current = true;
                 setShowSearchArea(false);
-              } else if (event.type === "error")
+              } else if (event.type === "error") {
                 showToast(event.message || "Something went wrong");
-              else if (event.type === "complete")
+              } else if (event.type === "complete") {
                 setTimeout(() => setStatusMessage(null), 2000);
+              }
             } catch {
               /* skip */
             }
@@ -341,33 +357,32 @@ export default function Map() {
     [],
   );
 
-  const requestLocation = useCallback(async () => {
+  const requestLocation = useCallback(() => {
     setLocationState("locating");
-    try {
-      const res = await fetch("/api/geolocate", { method: "POST" });
-      const data = await res.json();
-      if (
-        !res.ok ||
-        typeof data.lat !== "number" ||
-        typeof data.lng !== "number"
-      ) {
-        setLocationState("failed");
-        return;
-      }
-      setLocationState("granted");
-      setOverlayDismissed(true);
-      if (map.current) {
-        skipNextMoveEnd.current = true;
-        map.current.flyTo({
-          center: [data.lng, data.lat],
-          zoom: 14,
-          duration: 1500,
-        });
-      }
-      searchCityRef.current(data.lat, data.lng);
-    } catch {
+
+    if (!navigator.geolocation) {
       setLocationState("failed");
+      return;
     }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        console.log("[Geolocate] Browser GPS:", latitude, longitude);
+        setLocationState("granted");
+        setOverlayDismissed(true);
+        if (map.current) {
+          skipNextMoveEnd.current = true;
+          map.current.flyTo({ center: [longitude, latitude], zoom: 14, duration: 1500 });
+        }
+        searchCityRef.current(latitude, longitude);
+      },
+      (err) => {
+        console.log("[Geolocate] Browser error:", err.message);
+        setLocationState("failed");
+      },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
+    );
   }, []);
 
   // Initialize map
@@ -716,6 +731,9 @@ export default function Map() {
                 {statusMessage}
               </p>
             )}
+            <div style={{ width: '100%', background: 'rgba(0,0,0,0.1)', borderRadius: 9999, height: 4, marginTop: 16 }}>
+              <div style={{ width: `${progress}%`, background: '#1a73e8', height: 4, borderRadius: 9999, transition: 'width 0.2s ease' }} />
+            </div>
           </div>
         </div>
       )}
