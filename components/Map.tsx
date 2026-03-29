@@ -277,7 +277,6 @@ export default function Map() {
               } else if (event.type === "cafes") {
                 clearInterval(progressInterval.current);
                 setProgress(100);
-                setFirstSearchCity(null);
                 const receivedCafes = event.cafes as Cafe[];
                 console.log('[Map] SSE cafes event received:', receivedCafes.length, 'cafés');
                 updateCafes(receivedCafes, true);
@@ -291,6 +290,11 @@ export default function Map() {
                 lastSearchCenter.current = { lat, lng };
                 hasInitialSearch.current = true;
                 setShowSearchArea(false);
+                // Delay overlay dismiss so user sees 100% bar
+                setTimeout(() => {
+                  setFirstSearchCity(null);
+                  setProgress(0);
+                }, 400);
               } else if (event.type === "error") {
                 showToast(event.message || "Something went wrong");
               } else if (event.type === "complete") {
@@ -676,9 +680,10 @@ export default function Map() {
         </div>
       </div>
 
-      {/* Dark mode toggle — fixed position */}
+      {/* Dark mode toggle — desktop (top right) */}
       <button
         onClick={toggleDarkMode}
+        className="hidden sm:flex"
         style={{
           position: 'fixed',
           top: 12,
@@ -691,11 +696,35 @@ export default function Map() {
           cursor: 'pointer',
           fontSize: 18,
           boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
-          display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           height: 40,
           minWidth: 56,
+        }}
+        title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+      >
+        {darkMode ? '🌙' : '☀️'}
+      </button>
+
+      {/* Dark mode toggle — mobile (bottom right) */}
+      <button
+        onClick={toggleDarkMode}
+        className="flex sm:hidden"
+        style={{
+          position: 'fixed',
+          bottom: 100,
+          right: 12,
+          zIndex: 100,
+          background: darkMode ? '#1a1a1a' : 'white',
+          border: darkMode ? '1px solid #333' : '1px solid #e0e0e0',
+          borderRadius: '50%',
+          cursor: 'pointer',
+          fontSize: 20,
+          boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 44,
+          height: 44,
         }}
         title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
       >

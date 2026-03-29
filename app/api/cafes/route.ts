@@ -7,7 +7,6 @@ const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!;
 
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-const MIN_REVIEWS_FOR_CLAUDE = 3;
 const ENRICHMENT_BATCH_SIZE = 5;
 
 const TIER1_CITIES = ['london', 'londres'];
@@ -233,6 +232,8 @@ export async function GET(request: Request) {
   return Response.json(allCafes || []);
 }
 
+const REVIEW_WORK_KEYWORDS = ['wifi', 'wi-fi', 'laptop', 'work', 'working', 'remote', 'cowork', 'plug', 'socket', 'outlet', 'study', 'studying'];
+
 async function enrichWithReviews(
   cafeName: string,
   reviews: string[],
@@ -246,11 +247,20 @@ async function enrichWithReviews(
   reason: string;
   key_quote: string | null;
 }> {
-  const fallback = { laptop_allowed: null, wifi_rating: null, seating_rating: null, confidence: 'unconfirmed' as const, reason: 'no data', key_quote: null };
+  const fallback = { laptop_allowed: null, wifi_rating: null, seating_rating: null, confidence: 'unconfirmed' as const, reason: 'no work keywords in reviews', key_quote: null };
 
-  if (reviews.length < MIN_REVIEWS_FOR_CLAUDE && !blogContext) {
+  // Pre-filter: only send reviews with work keywords to Claude
+  const relevantReviews = reviews.filter(r => {
+    const lower = r.toLowerCase();
+    return REVIEW_WORK_KEYWORDS.some(kw => lower.includes(kw));
+  });
+
+  if (relevantReviews.length === 0 && !blogContext) {
+    console.log(`[Pre-filter] ${cafeName} — no work keywords found, skipping enrichment`);
     return fallback;
   }
+
+  console.log(`[Pre-filter] ${cafeName} — found work keywords in ${relevantReviews.length} of ${reviews.length} reviews, sending to Claude`);
 
   const blogSection = blogContext
     ? `\nHere are raw search snippets mentioning this area. Only use these if they explicitly name this specific café "${cafeName}":\n${blogContext}`
@@ -286,7 +296,7 @@ CONFIDENCE: 'inferred' if laptop_allowed is true or false. 'unconfirmed' if null
 REASON: Brief explanation of your laptop_allowed decision.
 KEY_QUOTE: Copy the single most relevant sentence verbatim from the reviews provided that best justifies your laptop_allowed decision. This must be an exact copy of text from the reviews, not a summary. Max 150 characters. If no relevant quote exists, set to null.
 
-Reviews: ${JSON.stringify(reviews)}
+Reviews: ${JSON.stringify(relevantReviews)}
 Place types: ${JSON.stringify(types)}${blogSection}
 
 Return JSON: { "laptop_allowed": ..., "wifi_rating": ..., "seating_rating": ..., "confidence": "...", "reason": "...", "key_quote": ... }`,
@@ -334,7 +344,9 @@ export async function POST(request: Request) {
 
       try {
         const city = providedCity || await reverseGeocode(lat, lng) || 'Unknown';
-        console.log('[Pipeline] Start for city:', city, 'at', lat, lng);
+        console.log('\n' + '='.repeat(60));
+        console.log('[Pipeline START]', new Date().toISOString(), 'City:', city);
+        console.log('='.repeat(60) + '\n');
 
         // STEP 1: Check city cache
         send({ type: 'status', message: `📍 Finding cafés in ${city}...` });
@@ -541,14 +553,16 @@ export async function POST(request: Request) {
         console.log(`[Pipeline] City: ${city}, Tier: ${tier}, Max enrichment: ${maxEnrich}`);
 
         const toSkip = workItems.filter(w => w.skipEnrichment);
+        // Send all non-skipped cafés to enrichment — the pre-filter inside enrichWithReviews
+        // will skip Claude if no reviews contain work keywords
         const toEnrich = workItems
-          .filter(w => !w.skipEnrichment && (w.reviewTexts.length >= MIN_REVIEWS_FOR_CLAUDE || blogContextText))
+          .filter(w => !w.skipEnrichment && (w.reviewTexts.length > 0 || blogContextText))
           .slice(0, maxEnrich);
         const noEnrich = workItems.filter(w =>
-          !w.skipEnrichment && w.reviewTexts.length < MIN_REVIEWS_FOR_CLAUDE && !blogContextText
+          !w.skipEnrichment && w.reviewTexts.length === 0 && !blogContextText
         );
 
-        console.log(`[Pipeline] Enriching ${toEnrich.length} cafés, skipping ${toSkip.length} (cached), ${noEnrich.length} with <${MIN_REVIEWS_FOR_CLAUDE} reviews (unconfirmed)`);
+        console.log(`[Pipeline] Enriching ${toEnrich.length} cafés (pre-filter will skip non-work reviews), skipping ${toSkip.length} (cached), ${noEnrich.length} with no reviews`);
 
         // Run Claude enrichment in batches of 3 with 2s delay between
         const claudeResults = new Map<string, Awaited<ReturnType<typeof enrichWithReviews>>>();
@@ -681,40 +695,56 @@ export async function POST(request: Request) {
           console.log('[Upsert Example]', JSON.stringify(enrichedCafes[0], null, 2));
         }
 
-        // Check which cafés are user-verified (protect their data)
+        // Check existing cafés to protect user-verified AND previously enriched data
         const enrichedPlaceIds = enrichedCafes.map(c => c.google_place_id).filter(Boolean);
-        const { data: verifiedRows } = await supabase
+        const { data: existingRows } = await supabase
           .from('cafes')
           .select('google_place_id, user_verified, laptop_allowed, wifi_rating, seating_rating, confidence, enrichment_reason')
-          .in('google_place_id', enrichedPlaceIds)
-          .eq('user_verified', true);
+          .in('google_place_id', enrichedPlaceIds);
 
-        const verifiedMap = new Map<string, Record<string, unknown>>();
-        if (verifiedRows) {
-          for (const v of verifiedRows) {
-            if (v.google_place_id) verifiedMap.set(v.google_place_id, v);
+        const existingMap = new Map<string, Record<string, unknown>>();
+        if (existingRows) {
+          for (const row of existingRows) {
+            if (row.google_place_id) existingMap.set(row.google_place_id, row);
           }
         }
 
-        if (verifiedMap.size > 0) {
-          console.log(`[Pipeline] Protecting ${verifiedMap.size} user-verified cafés from overwrite`);
-        }
-
-        // Preserve user-verified fields
+        // Build safe upsert: protect user-verified data AND don't overwrite enriched data with nulls
         const safeCafes = enrichedCafes.map(c => {
-          const verified = verifiedMap.get(c.google_place_id);
-          if (verified) {
+          const existing = existingMap.get(c.google_place_id);
+          if (!existing) return c;
+
+          // User-verified: protect all work fields
+          if (existing.user_verified) {
             return {
               ...c,
-              laptop_allowed: verified.laptop_allowed as boolean | null,
-              wifi_rating: verified.wifi_rating as number | null,
-              seating_rating: verified.seating_rating as number | null,
-              confidence: verified.confidence as string,
-              enrichment_reason: verified.enrichment_reason as string | null,
+              laptop_allowed: existing.laptop_allowed as boolean | null,
+              wifi_rating: existing.wifi_rating as number | null,
+              seating_rating: existing.seating_rating as number | null,
+              confidence: existing.confidence as string,
+              enrichment_reason: existing.enrichment_reason as string | null,
             };
           }
+
+          // Not user-verified but has existing enriched data: don't overwrite with nulls
+          if (existing.laptop_allowed !== null && c.laptop_allowed === null) {
+            return {
+              ...c,
+              laptop_allowed: existing.laptop_allowed as boolean | null,
+              wifi_rating: (c.wifi_rating ?? existing.wifi_rating) as number | null,
+              seating_rating: (c.seating_rating ?? existing.seating_rating) as number | null,
+              confidence: (c.confidence === 'unconfirmed' && existing.confidence !== 'unconfirmed') ? existing.confidence as string : c.confidence,
+              enrichment_reason: c.enrichment_reason || existing.enrichment_reason as string | null,
+            };
+          }
+
           return c;
         });
+
+        const protectedCount = safeCafes.filter((c, i) => c !== enrichedCafes[i]).length;
+        if (protectedCount > 0) {
+          console.log(`[Pipeline] Protected ${protectedCount} cafés from data downgrade`);
+        }
 
         const { error: upsertError } = await supabase
           .from('cafes')
