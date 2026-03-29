@@ -491,7 +491,7 @@ export default function Map() {
       const popup = new mapboxgl.Popup({
         offset: 12,
         closeButton: true,
-        maxWidth: "340px",
+        maxWidth: window.innerWidth < 768 ? "85vw" : "340px",
         anchor: "bottom",
         className: "nomad-popup",
       }).setHTML(popupHTML(cafe, darkMode));
@@ -713,7 +713,8 @@ export default function Map() {
           }}
           title="Go to my location"
         >
-          📍 My location
+          <span>📍</span>
+          <span className="hidden sm:inline"> My location</span>
         </button>
       </div>
 

@@ -19,12 +19,14 @@ export default function Filters({
     onChange({ ...filters, [key]: !filters[key] });
   };
 
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+
   const chipStyle = (active: boolean): React.CSSProperties => ({
     background: active ? '#1a73e8' : (dark ? '#1a1a1a' : '#fff'),
     color: active ? '#fff' : (dark ? '#fff' : '#333'),
     borderRadius: 20,
-    padding: '8px 16px',
-    fontSize: 14,
+    padding: isMobile ? '6px 12px' : '8px 16px',
+    fontSize: isMobile ? 12 : 14,
     fontWeight: 500,
     border: dark && !active ? '1px solid #333' : 'none',
     cursor: 'pointer',
@@ -34,7 +36,7 @@ export default function Filters({
   });
 
   return (
-    <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+    <div style={{ display: 'flex', gap: isMobile ? 6 : 8, marginBottom: 20 }}>
       <button style={chipStyle(filters.laptop)} onClick={() => toggle('laptop')}>
         💻 Laptop friendly
       </button>

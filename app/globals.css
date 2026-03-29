@@ -119,3 +119,24 @@ html, body {
 .marker-pulse {
   animation: marker-pulse 0.6s ease-out;
 }
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+  /* Popup — fit within mobile viewport */
+  .mapboxgl-popup {
+    max-width: 85vw !important;
+  }
+
+  .mapboxgl-popup-content {
+    max-height: 60vh !important;
+  }
+
+  /* Close button — slightly smaller on mobile */
+  .mapboxgl-popup-close-button {
+    top: 8px !important;
+    right: 8px !important;
+    width: 28px !important;
+    height: 28px !important;
+    font-size: 18px !important;
+  }
+}
