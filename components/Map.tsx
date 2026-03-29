@@ -706,14 +706,14 @@ export default function Map() {
         {darkMode ? '🌙' : '☀️'}
       </button>
 
-      {/* Dark mode toggle — mobile (bottom right) */}
+      {/* Dark mode toggle — mobile (bottom left) */}
       <button
         onClick={toggleDarkMode}
         className="flex sm:hidden"
         style={{
           position: 'fixed',
           bottom: 100,
-          right: 12,
+          left: 12,
           zIndex: 100,
           background: darkMode ? '#1a1a1a' : 'white',
           border: darkMode ? '1px solid #333' : '1px solid #e0e0e0',
