@@ -13,6 +13,18 @@ mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!;
 const LIGHT_STYLE = "mapbox://styles/miletteriis/cmnal77gg004p01s4cwqed436";
 const DARK_STYLE = "mapbox://styles/mapbox/dark-v11";
 
+const LOADING_MESSAGES = [
+  "🔍 Searching blog posts...",
+  "📖 Reading Reddit threads...",
+  "☕ Finding cafés...",
+  "⭐ Checking Google reviews...",
+  "🗺️ Mapping work spots...",
+  "📡 Fetching WiFi ratings...",
+  "🤖 Analysing reviews...",
+  "💾 Saving to database...",
+  "🌍 Almost there...",
+];
+
 function markerColor(cafe: Cafe): string {
   if (cafe.laptop_allowed === true) return "#34a853";
   if (cafe.laptop_allowed === false) return "#ea4335";
@@ -131,7 +143,9 @@ export default function Map() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [firstSearchCity, setFirstSearchCity] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [messageIndex, setMessageIndex] = useState(0);
   const progressInterval = useRef<ReturnType<typeof setInterval>>(undefined);
+  const messageInterval = useRef<ReturnType<typeof setInterval>>(undefined);
   const [locationState, setLocationState] = useState<
     "pending" | "locating" | "granted" | "failed"
   >("pending");
@@ -263,24 +277,29 @@ export default function Map() {
               if (event.type === "first_search") {
                 setFirstSearchCity(event.city as string);
                 setProgress(0);
+                setMessageIndex(0);
                 clearInterval(progressInterval.current);
+                clearInterval(messageInterval.current);
+                // Steady progress bar
                 progressInterval.current = setInterval(() => {
                   setProgress(prev => {
-                    if (prev >= 92) return 92;
-                    const factor = Math.pow(1 - prev / 100, 2);
-                    const increment = (Math.random() * 2 + 0.5) * factor;
-                    return Math.min(prev + increment, 92);
+                    if (prev >= 85) return prev;
+                    return Math.min(prev + Math.random() * 4 + 2, 85);
                   });
-                }, 200);
+                }, 300);
+                // Rotating messages
+                messageInterval.current = setInterval(() => {
+                  setMessageIndex(prev => (prev + 1) % LOADING_MESSAGES.length);
+                }, 3000);
               } else if (event.type === "status") {
                 setStatusMessage(event.message);
               } else if (event.type === "cafes") {
                 clearInterval(progressInterval.current);
+                clearInterval(messageInterval.current);
                 setProgress(100);
                 const receivedCafes = event.cafes as Cafe[];
                 console.log('[Map] SSE cafes event received:', receivedCafes.length, 'cafés');
                 updateCafes(receivedCafes, true);
-                // Ensure map is centered where cafés are
                 if (map.current && receivedCafes.length > 0) {
                   const avgLat = receivedCafes.reduce((s, c) => s + c.lat, 0) / receivedCafes.length;
                   const avgLng = receivedCafes.reduce((s, c) => s + c.lng, 0) / receivedCafes.length;
@@ -290,10 +309,10 @@ export default function Map() {
                 lastSearchCenter.current = { lat, lng };
                 hasInitialSearch.current = true;
                 setShowSearchArea(false);
-                // Delay overlay dismiss so user sees 100% bar
                 setTimeout(() => {
                   setFirstSearchCity(null);
                   setProgress(0);
+                  setMessageIndex(0);
                 }, 400);
               } else if (event.type === "error") {
                 showToast(event.message || "Something went wrong");
@@ -784,16 +803,15 @@ export default function Map() {
               but you&apos;re making it faster for everyone who comes after you
               ☕
             </p>
-            {statusMessage && (
-              <p
-                style={{ fontSize: 14, color: cardTextFaint, marginTop: 20 }}
-                className="animate-fade-in"
-              >
-                {statusMessage}
-              </p>
-            )}
+            <p
+              style={{ fontSize: 14, color: cardTextFaint, marginTop: 20, minHeight: 20 }}
+              key={messageIndex}
+              className="animate-fade-in"
+            >
+              {LOADING_MESSAGES[messageIndex]}
+            </p>
             <div style={{ width: '100%', background: 'rgba(0,0,0,0.1)', borderRadius: 9999, height: 4, marginTop: 16 }}>
-              <div style={{ width: `${progress}%`, background: '#1a73e8', height: 4, borderRadius: 9999, transition: 'width 0.2s ease' }} />
+              <div style={{ width: `${progress}%`, background: '#1a73e8', height: 4, borderRadius: 9999, transition: 'width 0.3s ease' }} />
             </div>
           </div>
         </div>

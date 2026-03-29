@@ -10,7 +10,7 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const ENRICHMENT_BATCH_SIZE = 5;
 
 const TIER1_CITIES = ['london', 'londres'];
-const TIER2_CITIES = ['paris', 'berlin', 'barcelona', 'lisbon', 'lisboa', 'amsterdam', 'new york', 'bangkok', 'bali', 'tokyo', 'singapore', 'melbourne', 'medellin', 'medellín', 'rome', 'roma', 'prague', 'praha', 'budapest'];
+const TIER2_CITIES = ['paris', 'berlin', 'barcelona', 'lisbon', 'lisboa', 'amsterdam', 'new york', 'bangkok', 'bali', 'tokyo', 'singapore', 'melbourne', 'medellin', 'medellín', 'rome', 'roma', 'prague', 'praha', 'budapest', 'chiang mai', 'mueang chiang mai', 'เชียงใหม่', 'florence', 'firenze', 'venice', 'venezia', 'naples', 'napoli', 'cologne', 'köln', 'munich', 'münchen', 'vienna', 'wien', 'mexico city', 'cdmx'];
 
 function getTier(city: string): number {
   const c = city.toLowerCase();
@@ -27,6 +27,7 @@ const TIER2_COORDS: Record<string, [string, number, number][]> = {
   lisbon: [['Alfama', 38.7139, -9.1334], ['Bairro Alto', 38.7107, -9.1440], ['LX Factory', 38.7006, -9.1774], ['Príncipe Real', 38.7151, -9.1490], ['Intendente', 38.7216, -9.1362]],
   'new york': [['Manhattan', 40.7580, -73.9855], ['Brooklyn', 40.6782, -73.9442], ['Williamsburg', 40.7081, -73.9571], ['East Village', 40.7265, -73.9815], ['Soho', 40.7234, -74.0030]],
   bangkok: [['Silom', 13.7244, 100.5286], ['Sukhumvit', 13.7372, 100.5608], ['Ari', 13.7756, 100.5431], ['Thonglor', 13.7305, 100.5843], ['Ekkamai', 13.7213, 100.5844]],
+  'chiang mai': [['Old City', 18.7883, 98.9853], ['Nimman', 18.7955, 98.9680], ['Santitham', 18.8005, 98.9780], ['Chang Phueak', 18.8050, 98.9830], ['Night Bazaar', 18.7850, 98.9950]],
 };
 
 const LONDON_COORDS: [string, number, number][] = [
@@ -60,6 +61,34 @@ async function reverseGeocode(lat: number, lng: number): Promise<string | null> 
   } catch {
     return null;
   }
+}
+
+const CITY_NAME_MAP: Record<string, string> = {
+  lisboa: 'Lisbon', roma: 'Rome', praha: 'Prague', münchen: 'Munich',
+  wien: 'Vienna', köln: 'Cologne', moskva: 'Moscow', londres: 'London',
+  'mueang chiang mai': 'Chiang Mai', 'chiang mai': 'Chiang Mai', 'เชียงใหม่': 'Chiang Mai',
+  firenze: 'Florence', venezia: 'Venice', napoli: 'Naples',
+  'cidade do méxico': 'Mexico City', cdmx: 'Mexico City',
+  'krung thep': 'Bangkok', 'krung thep maha nakhon': 'Bangkok',
+  'new york city': 'New York', nyc: 'New York',
+  'los angeles': 'Los Angeles', la: 'Los Angeles',
+};
+
+const DISTRICT_PREFIXES = ['Mueang', 'Amphoe', 'District', 'Borough', 'County', 'Municipality'];
+
+function extractCityName(rawCity: string): string {
+  const parts = rawCity.split(',').map(p => p.trim());
+  if (parts.length > 1 && DISTRICT_PREFIXES.some(p => parts[0].startsWith(p))) {
+    return parts[1];
+  }
+  return parts[0];
+}
+
+function normalizeCity(rawCity: string): string {
+  const extracted = extractCityName(rawCity);
+  const mapped = CITY_NAME_MAP[extracted.toLowerCase()] || extracted;
+  console.log(`[City Normalise] Raw: ${rawCity} → Extracted: ${extracted} → English: ${mapped}`);
+  return mapped;
 }
 
 interface BlogSnippet {
@@ -343,7 +372,8 @@ export async function POST(request: Request) {
       };
 
       try {
-        const city = providedCity || await reverseGeocode(lat, lng) || 'Unknown';
+        const rawCity = providedCity || await reverseGeocode(lat, lng) || 'Unknown';
+        const city = normalizeCity(rawCity);
         console.log('\n' + '='.repeat(60));
         console.log('[Pipeline START]', new Date().toISOString(), 'City:', city);
         console.log('='.repeat(60) + '\n');

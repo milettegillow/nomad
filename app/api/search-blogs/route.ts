@@ -7,13 +7,35 @@ const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 const WORK_KEYWORDS = ['work', 'coworking', 'laptop', 'wifi', 'wi-fi', 'telework', 'nomad', 'remote work', 'study', 'freelanc', 'digital nomad', 'outlet', 'plug'];
 
 const TIER1_CITIES = ['london', 'londres'];
-const TIER2_CITIES = ['paris', 'berlin', 'barcelona', 'lisbon', 'lisboa', 'amsterdam', 'new york', 'bangkok', 'bali', 'tokyo', 'singapore', 'melbourne', 'medellin', 'medellín', 'rome', 'roma', 'prague', 'praha', 'budapest'];
+const TIER2_CITIES = ['paris', 'berlin', 'barcelona', 'lisbon', 'lisboa', 'amsterdam', 'new york', 'bangkok', 'bali', 'tokyo', 'singapore', 'melbourne', 'medellin', 'medellín', 'rome', 'roma', 'prague', 'praha', 'budapest', 'chiang mai', 'mueang chiang mai', 'เชียงใหม่', 'florence', 'firenze', 'venice', 'venezia', 'naples', 'napoli', 'cologne', 'köln', 'munich', 'münchen', 'vienna', 'wien', 'mexico city', 'cdmx'];
 
 const CITY_NAME_MAP: Record<string, string> = {
   lisboa: 'Lisbon', roma: 'Rome', praha: 'Prague', münchen: 'Munich',
   wien: 'Vienna', köln: 'Cologne', moskva: 'Moscow', londres: 'London',
+  'mueang chiang mai': 'Chiang Mai', 'chiang mai': 'Chiang Mai', 'เชียงใหม่': 'Chiang Mai',
+  firenze: 'Florence', venezia: 'Venice', napoli: 'Naples',
+  'cidade do méxico': 'Mexico City', cdmx: 'Mexico City',
+  'krung thep': 'Bangkok', 'krung thep maha nakhon': 'Bangkok',
+  'new york city': 'New York', nyc: 'New York',
+  'los angeles': 'Los Angeles', la: 'Los Angeles',
 };
-const normalizeCity = (city: string) => CITY_NAME_MAP[city.toLowerCase()] || city;
+
+const DISTRICT_PREFIXES = ['Mueang', 'Amphoe', 'District', 'Borough', 'County', 'Municipality'];
+
+function extractCityName(rawCity: string): string {
+  const parts = rawCity.split(',').map(p => p.trim());
+  if (parts.length > 1 && DISTRICT_PREFIXES.some(p => parts[0].startsWith(p))) {
+    return parts[1];
+  }
+  return parts[0];
+}
+
+function normalizeCity(rawCity: string): string {
+  const extracted = extractCityName(rawCity);
+  const mapped = CITY_NAME_MAP[extracted.toLowerCase()] || extracted;
+  console.log(`[City Normalise] Raw: ${rawCity} → Extracted: ${extracted} → English: ${mapped}`);
+  return mapped;
+}
 
 const TIER2_AREAS: Record<string, string[]> = {
   paris: ['Marais', 'Montmartre', 'Saint-Germain', 'Bastille', 'Belleville'],
@@ -23,6 +45,7 @@ const TIER2_AREAS: Record<string, string[]> = {
   lisbon: ['Alfama', 'Bairro Alto', 'LX Factory', 'Príncipe Real', 'Intendente'],
   'new york': ['Manhattan', 'Brooklyn', 'Williamsburg', 'East Village', 'Soho'],
   bangkok: ['Silom', 'Sukhumvit', 'Ari', 'Thonglor', 'Ekkamai'],
+  'chiang mai': ['Old City', 'Nimman', 'Santitham', 'Chang Phueak', 'Night Bazaar'],
 };
 
 const LONDON_AREAS = [
