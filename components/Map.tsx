@@ -283,10 +283,12 @@ export default function Map() {
                 // Steady progress bar
                 progressInterval.current = setInterval(() => {
                   setProgress(prev => {
-                    if (prev >= 85) return prev;
-                    return Math.min(prev + Math.random() * 4 + 2, 85);
+                    if (prev >= 95) return prev;
+                    const remaining = 95 - prev;
+                    const increment = Math.random() * (remaining * 0.08) + 0.3;
+                    return Math.min(prev + increment, 95);
                   });
-                }, 300);
+                }, 400);
                 // Rotating messages
                 messageInterval.current = setInterval(() => {
                   setMessageIndex(prev => (prev + 1) % LOADING_MESSAGES.length);
