@@ -28,6 +28,7 @@ export default function SearchBox({
   onSelectCity,
   onSelectCafe,
   onTyping,
+  onFocus,
   loading,
   dark,
   mapCenter,
@@ -35,6 +36,7 @@ export default function SearchBox({
   onSelectCity: (lng: number, lat: number, cityName: string) => void;
   onSelectCafe: (lat: number, lng: number, placeId: string, name: string, rating: number | null, address: string | null, photoName: string | null, dbId: string | null) => void;
   onTyping?: () => void;
+  onFocus?: () => void;
   loading?: boolean;
   dark?: boolean;
   mapCenter?: { lat: number; lng: number } | null;
@@ -134,7 +136,7 @@ export default function SearchBox({
   const secondaryColor = d ? '#888' : '#666';
 
   return (
-    <div ref={containerRef} className="relative" style={{ width: 400, maxWidth: 'calc(100vw - 24px)' }}>
+    <div ref={containerRef} className="relative w-full sm:w-[400px]">
       <div className="relative" style={{ boxShadow: '0 2px 6px rgba(0,0,0,0.3)', borderRadius: 8, border }}>
         <div className="absolute top-1/2 -translate-y-1/2" style={{ left: 12, color: iconColor }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -143,10 +145,20 @@ export default function SearchBox({
           type="text"
           value={query}
           onChange={(e) => search(e.target.value)}
+          onFocus={() => onFocus?.()}
           placeholder="Search a city or café..."
-          style={{ height: 46, borderRadius: 8, paddingLeft: 40, background: bg, color: text, border: 'none' }}
-          className={`w-full pr-4 outline-none text-base ${d ? 'placeholder-gray-500' : 'placeholder-gray-400'}`}
+          style={{ height: 46, borderRadius: 8, paddingLeft: 40, paddingRight: query ? 36 : 16, background: bg, color: text, border: 'none' }}
+          className={`w-full outline-none text-base ${d ? 'placeholder-gray-500' : 'placeholder-gray-400'}`}
         />
+        {query && (
+          <button
+            onClick={() => { setQuery(''); setItems([]); setOpen(false); }}
+            className="absolute top-1/2 -translate-y-1/2"
+            style={{ right: 12, color: d ? '#666' : '#999', fontSize: 18, cursor: 'pointer', background: 'none', border: 'none', padding: 0, lineHeight: 1 }}
+          >
+            ×
+          </button>
+        )}
       </div>
       {open && items.length > 0 && (
         <ul className="absolute top-full mt-1 w-full overflow-hidden z-50" style={{ borderRadius: 8, boxShadow: '0 2px 6px rgba(0,0,0,0.3)', background: dropdownBg, border }}>

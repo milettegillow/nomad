@@ -280,9 +280,14 @@ export default function Map() {
                 setFirstSearchCity(null);
                 const receivedCafes = event.cafes as Cafe[];
                 console.log('[Map] SSE cafes event received:', receivedCafes.length, 'cafés');
-                console.log('[Map] First café:', receivedCafes[0]?.name, 'at', receivedCafes[0]?.lat, receivedCafes[0]?.lng);
-                console.log('[Map] map.current exists:', !!map.current);
                 updateCafes(receivedCafes, true);
+                // Ensure map is centered where cafés are
+                if (map.current && receivedCafes.length > 0) {
+                  const avgLat = receivedCafes.reduce((s, c) => s + c.lat, 0) / receivedCafes.length;
+                  const avgLng = receivedCafes.reduce((s, c) => s + c.lng, 0) / receivedCafes.length;
+                  skipNextMoveEnd.current = true;
+                  map.current.jumpTo({ center: [avgLng, avgLat], zoom: 14 });
+                }
                 lastSearchCenter.current = { lat, lng };
                 hasInitialSearch.current = true;
                 setShowSearchArea(false);
@@ -477,12 +482,19 @@ export default function Map() {
     markersRef.current.forEach(({ marker }) => marker.remove());
     markersRef.current.clear();
 
-    const filtered = cafes.filter((cafe) => {
-      if (filters.laptop && cafe.laptop_allowed !== true) return false;
-      if (filters.wifi && cafe.wifi_rating == null) return false;
-      if (filters.seating && cafe.seating_rating == null) return false;
-      return true;
-    });
+    const filtered = cafes
+      .filter((cafe) => {
+        if (filters.laptop && cafe.laptop_allowed !== true) return false;
+        if (filters.wifi && cafe.wifi_rating == null) return false;
+        if (filters.seating && cafe.seating_rating == null) return false;
+        return true;
+      })
+      // Render green (laptop_allowed=true) last so they appear on top
+      .sort((a, b) => {
+        if (a.laptop_allowed === true && b.laptop_allowed !== true) return 1;
+        if (b.laptop_allowed === true && a.laptop_allowed !== true) return -1;
+        return 0;
+      });
 
     filtered.forEach((cafe) => {
       const el = document.createElement("div");
@@ -644,21 +656,27 @@ export default function Map() {
       <div ref={mapContainer} className="w-full h-full" />
 
       {/* Search box */}
-      <div className="absolute z-30" style={{ top: 10, left: 10 }}>
+      <div className="absolute z-30" style={{ top: 10, left: 10, right: 10 }}>
+        <div className="sm:w-auto" style={{ maxWidth: 400 }}>
         <SearchBox
           onSelectCity={handleCitySearch}
           onSelectCafe={handleCafeSearch}
           onTyping={() => setOverlayDismissed(true)}
+          onFocus={() => {
+            markersRef.current.forEach(({ marker }) => marker.getPopup()?.remove());
+            setPopupOpen(false);
+          }}
           loading={loadingCafes}
           dark={darkMode}
           mapCenter={map.current ? { lat: map.current.getCenter().lat, lng: map.current.getCenter().lng } : null}
         />
+        </div>
       </div>
 
-      {/* Top-right buttons */}
+      {/* Top-right buttons — hidden on mobile */}
       <div
-        className="absolute z-20"
-        style={{ top: 10, right: 10, display: "flex", gap: 8 }}
+        className="absolute z-20 hidden sm:flex"
+        style={{ top: 10, right: 10, gap: 8 }}
       >
         {/* Dark mode toggle */}
         <button
