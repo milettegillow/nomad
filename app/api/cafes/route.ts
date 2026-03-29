@@ -89,6 +89,81 @@ async function googleNearbySearch(lat: number, lng: number): Promise<GooglePlace
   }
 }
 
+// --- Lightweight GET for pan-based loading ---
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const lat = parseFloat(searchParams.get('lat') || '');
+  const lng = parseFloat(searchParams.get('lng') || '');
+
+  console.log('[Pan Search] Incoming request — lat:', lat, 'lng:', lng);
+
+  if (isNaN(lat) || isNaN(lng)) {
+    return Response.json({ error: 'lat and lng required' }, { status: 400 });
+  }
+
+  const latDelta = 0.018;
+  const lngDelta = 0.018 / Math.cos((lat * Math.PI) / 180);
+
+  // Check Supabase for existing cafés in this area
+  const { data: existing } = await supabase
+    .from('cafes')
+    .select('*')
+    .gte('lat', lat - latDelta)
+    .lte('lat', lat + latDelta)
+    .gte('lng', lng - lngDelta)
+    .lte('lng', lng + lngDelta);
+
+  console.log('[Pan Search] Supabase found:', existing?.length ?? 0, 'existing cafés');
+
+  // Always fetch from Google Places to discover new cafés
+  const places = await googleNearbySearch(lat, lng);
+  console.log('[Pan Search] Google Places returned:', places.length, 'cafés');
+
+  if (places.length === 0) {
+    console.log('[Pan Search] Returning', existing?.length ?? 0, 'existing only');
+    return Response.json(existing || []);
+  }
+
+  const cafesToUpsert = places.map(place => ({
+    name: place.displayName?.text || 'Unknown',
+    lat: place.location?.latitude ?? lat,
+    lng: place.location?.longitude ?? lng,
+    address: place.formattedAddress || null,
+    foursquare_id: null as string | null,
+    google_place_id: place.id,
+    laptop_allowed: null as boolean | null,
+    wifi_rating: null as number | null,
+    seating_rating: null as number | null,
+    google_rating: place.rating ?? null,
+    foursquare_rating: null as number | null,
+    confidence: 'unconfirmed' as const,
+    last_updated: new Date().toISOString(),
+    blog_sources: null as string[] | null,
+    work_summary: null as string | null,
+    enrichment_reason: null as string | null,
+    key_review_quote: null as string | null,
+    photo_url: null as string | null,
+    photo_name: place.photos?.[0]?.name || null,
+  }));
+
+  await supabase
+    .from('cafes')
+    .upsert(cafesToUpsert, { onConflict: 'google_place_id', ignoreDuplicates: true });
+
+  // Re-fetch to get all cafés including existing enriched ones
+  const { data: allCafes } = await supabase
+    .from('cafes')
+    .select('*')
+    .gte('lat', lat - latDelta)
+    .lte('lat', lat + latDelta)
+    .gte('lng', lng - lngDelta)
+    .lte('lng', lng + lngDelta);
+
+  console.log('[Pan] Returning', allCafes?.length ?? 0, 'cafés (fetched', places.length, 'from Google)');
+  return Response.json(allCafes || []);
+}
+
 async function enrichWithReviews(
   cafeName: string,
   reviews: string[],

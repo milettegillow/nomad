@@ -8,8 +8,9 @@ const geist = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "Nomad — Find laptop-friendly cafés",
-  description: "Discover cafés where you can work, with WiFi and seating ratings from the community.",
+  title: "Nomad - Find laptop-friendly cafés",
+  description:
+    "Discover cafés where you can work, with WiFi and seating ratings from the community.",
 };
 
 export default function RootLayout({
