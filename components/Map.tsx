@@ -85,7 +85,7 @@ function popupHTML(cafe: Cafe, dark: boolean) {
   const popupBorder = dark ? "1px solid #333333" : "1px solid #e8e8e8";
 
   return `
-    <div style="font-family:system-ui;color:${text};min-width:240px;background:${bg};border:${popupBorder};border-radius:12px;padding:16px">
+    <div style="font-family:system-ui;color:${text};min-width:240px;background:${bg};border:${popupBorder};border-radius:12px;padding:16px;padding-bottom:4px">
       <div style="font-weight:700;font-size:16px;margin-bottom:6px;color:${nameColor}">${cafe.name}</div>
       ${cafe.address ? `<div style="font-size:14px;color:${addrColor};margin-bottom:12px;line-height:1.4">${cafe.address}</div>` : ""}
       ${cafe.photo_name ? `<img src="/api/photo?name=${encodeURIComponent(cafe.photo_name)}" alt="" style="width:100%;height:160px;object-fit:cover;border-radius:8px;margin:8px 0 12px 0;display:block" />` : ""}
@@ -99,7 +99,7 @@ function popupHTML(cafe: Cafe, dark: boolean) {
       <button
         data-cafe-id="${cafe.id}"
         class="suggest-correction-btn"
-        style="width:100%;padding:10px 16px;background:${btnBg};color:${btnText};border:1px solid ${btnBorder};border-radius:12px;cursor:pointer;font-size:13px;font-weight:500;transition:background 0.15s"
+        style="width:100%;padding:10px 16px;margin-top:12px;margin-bottom:4px;background:${btnBg};color:${btnText};border:1px solid ${btnBorder};border-radius:12px;cursor:pointer;font-size:13px;font-weight:500;transition:background 0.15s"
         onmouseover="this.style.background='${btnHover}'"
         onmouseout="this.style.background='${btnBg}'"
       >Suggest a correction</button>
@@ -135,6 +135,7 @@ export default function Map() {
   const [locationState, setLocationState] = useState<
     "pending" | "locating" | "granted" | "failed"
   >("pending");
+  const locationDenied = useRef(false);
   const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [darkMode, setDarkMode] = useState(false);
@@ -377,11 +378,34 @@ export default function Map() {
         }
         searchCityRef.current(latitude, longitude);
       },
-      (err) => {
-        console.log("[Geolocate] Browser error:", err.message);
-        setLocationState("failed");
+      async (err) => {
+        console.log("[Geolocate] Browser error — code:", err.code, "message:", err.message);
+        if (err.code === 1) {
+          // Permission denied
+          locationDenied.current = true;
+          setLocationState("failed");
+        } else {
+          // Timeout or unavailable — try IP-based fallback
+          console.log("[Geolocate] Falling back to /api/geolocate");
+          try {
+            const res = await fetch("/api/geolocate", { method: "POST" });
+            const data = await res.json();
+            if (res.ok && typeof data.lat === "number" && typeof data.lng === "number") {
+              console.log("[Geolocate] IP fallback:", data.city, data.lat, data.lng);
+              setLocationState("granted");
+              setOverlayDismissed(true);
+              if (map.current) {
+                skipNextMoveEnd.current = true;
+                map.current.flyTo({ center: [data.lng, data.lat], zoom: 14, duration: 1500 });
+              }
+              searchCityRef.current(data.lat, data.lng);
+              return;
+            }
+          } catch { /* fall through */ }
+          setLocationState("failed");
+        }
       },
-      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
+      { enableHighAccuracy: false, timeout: 30000, maximumAge: 300000 }
     );
   }, []);
 
@@ -796,6 +820,11 @@ export default function Map() {
             <p style={{ fontSize: 20, fontWeight: 600, color: cardText }}>
               Search a city above to find work-friendly cafés 🔍
             </p>
+            {locationDenied.current && (
+              <p style={{ fontSize: 13, color: cardTextMuted, marginTop: 12, lineHeight: 1.5 }}>
+                📍 For best results, choose &quot;Allow on this site&quot; when prompted for location
+              </p>
+            )}
           </div>
         </div>
       )}
