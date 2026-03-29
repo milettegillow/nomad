@@ -76,6 +76,8 @@ export async function POST(request: Request) {
     if (Object.keys(cafeUpdate).length > 0) {
       cafeUpdate.enrichment_reason = notes ? `Reported by a user: ${notes}` : 'Reported by a user';
       cafeUpdate.confidence = 'inferred';
+      cafeUpdate.user_verified = true;
+      cafeUpdate.user_verified_at = new Date().toISOString();
 
       await supabase
         .from('cafes')
@@ -96,10 +98,10 @@ export async function POST(request: Request) {
       const noCount = allSubs.filter(s => s.laptop_allowed === false).length;
 
       if (yesCount >= 3) {
-        await supabase.from('cafes').update({ laptop_allowed: true, confidence: 'verified', enrichment_reason: 'Verified by community' }).eq('id', resolvedCafeId);
+        await supabase.from('cafes').update({ laptop_allowed: true, confidence: 'verified', enrichment_reason: 'Verified by community', user_verified: true, user_verified_at: new Date().toISOString() }).eq('id', resolvedCafeId);
         console.log('[Submissions] Café VERIFIED as laptop-friendly');
       } else if (noCount >= 3) {
-        await supabase.from('cafes').update({ laptop_allowed: false, confidence: 'verified', enrichment_reason: 'Verified by community' }).eq('id', resolvedCafeId);
+        await supabase.from('cafes').update({ laptop_allowed: false, confidence: 'verified', enrichment_reason: 'Verified by community', user_verified: true, user_verified_at: new Date().toISOString() }).eq('id', resolvedCafeId);
         console.log('[Submissions] Café VERIFIED as NOT laptop-friendly');
       }
     }

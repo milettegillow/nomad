@@ -7,9 +7,47 @@ const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!;
 
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-const MAX_CLAUDE_CALLS = 15;
 const MIN_REVIEWS_FOR_CLAUDE = 3;
-const ENRICHMENT_BATCH_SIZE = 3;
+const ENRICHMENT_BATCH_SIZE = 5;
+
+const TIER1_CITIES = ['london'];
+const TIER2_CITIES = ['paris', 'berlin', 'barcelona', 'lisbon', 'amsterdam', 'new york', 'bangkok', 'bali', 'tokyo', 'singapore', 'melbourne', 'medellin', 'medellín', 'rome', 'prague', 'budapest'];
+
+function getTier(city: string): number {
+  const c = city.toLowerCase();
+  if (TIER1_CITIES.some(t => c.includes(t))) return 1;
+  if (TIER2_CITIES.some(t => c.includes(t))) return 2;
+  return 3;
+}
+
+const TIER2_COORDS: Record<string, [string, number, number][]> = {
+  paris: [['Marais', 48.8566, 2.3522], ['Montmartre', 48.8867, 2.3431], ['Saint-Germain', 48.8534, 2.3326], ['Bastille', 48.8533, 2.3692], ['Belleville', 48.8713, 2.3840]],
+  berlin: [['Mitte', 52.5200, 13.4050], ['Prenzlauer Berg', 52.5394, 13.4144], ['Kreuzberg', 52.4987, 13.4027], ['Friedrichshain', 52.5163, 13.4543], ['Neukölln', 52.4811, 13.4350]],
+  barcelona: [['Gothic', 41.3830, 2.1770], ['Eixample', 41.3947, 2.1534], ['Gracia', 41.4036, 2.1530], ['Poble Nou', 41.3995, 2.1975], ['Barceloneta', 41.3802, 2.1894]],
+  amsterdam: [['Jordaan', 52.3752, 4.8826], ['De Pijp', 52.3532, 4.8979], ['Oud-West', 52.3667, 4.8671], ['Oost', 52.3600, 4.9299], ['Centrum', 52.3738, 4.8910]],
+  lisbon: [['Alfama', 38.7139, -9.1334], ['Bairro Alto', 38.7107, -9.1440], ['LX Factory', 38.7006, -9.1774], ['Príncipe Real', 38.7151, -9.1490], ['Intendente', 38.7216, -9.1362]],
+  'new york': [['Manhattan', 40.7580, -73.9855], ['Brooklyn', 40.6782, -73.9442], ['Williamsburg', 40.7081, -73.9571], ['East Village', 40.7265, -73.9815], ['Soho', 40.7234, -74.0030]],
+  bangkok: [['Silom', 13.7244, 100.5286], ['Sukhumvit', 13.7372, 100.5608], ['Ari', 13.7756, 100.5431], ['Thonglor', 13.7305, 100.5843], ['Ekkamai', 13.7213, 100.5844]],
+};
+
+const LONDON_COORDS: [string, number, number][] = [
+  ['Shoreditch', 51.5225, -0.0756], ['Brixton', 51.4613, -0.1156],
+  ['Hackney', 51.5450, -0.0553], ['Soho', 51.5137, -0.1340],
+  ['Peckham', 51.4740, -0.0697], ['Dalston', 51.5467, -0.0756],
+  ['Islington', 51.5362, -0.1033], ['Clerkenwell', 51.5237, -0.1072],
+  ['Bethnal Green', 51.5283, -0.0550], ['Notting Hill', 51.5090, -0.2010],
+  ['Fitzrovia', 51.5200, -0.1400], ['Bermondsey', 51.4983, -0.0810],
+  ['Camden', 51.5390, -0.1426], ['Clapham', 51.4610, -0.1380],
+  ['Wimbledon', 51.4214, -0.2064], ['Richmond', 51.4613, -0.3037],
+  ['Wandsworth', 51.4567, -0.1920], ['Battersea', 51.4781, -0.1483],
+  ['Fulham', 51.4812, -0.1954], ['Chelsea', 51.4875, -0.1687],
+  ['Kensington', 51.5006, -0.1927], ['Mayfair', 51.5099, -0.1478],
+  ['Marylebone', 51.5196, -0.1533], ['Paddington', 51.5154, -0.1755],
+  ['Hammersmith', 51.4927, -0.2236], ['Ealing', 51.5130, -0.3089],
+  ['Walthamstow', 51.5820, -0.0174], ['Stratford', 51.5417, -0.0027],
+  ['Canary Wharf', 51.5054, -0.0235], ['Greenwich', 51.4826, 0.0077],
+  ['Lewisham', 51.4615, -0.0136], ['Tooting', 51.4279, -0.1680],
+];
 
 // --- Helpers ---
 
@@ -31,7 +69,27 @@ interface BlogSnippet {
   url: string;
 }
 
-async function searchBlogs(city: string, origin: string): Promise<BlogSnippet[]> {
+interface BlogCafeExtracted {
+  name: string;
+  area: string | null;
+  laptop_notes: string | null;
+  wifi_notes: string | null;
+  source_url: string | null;
+}
+
+interface NegativeCafeExtracted {
+  name: string;
+  issue: string;
+  source_url: string | null;
+}
+
+interface BlogSearchResult {
+  snippets: BlogSnippet[];
+  cafes: BlogCafeExtracted[];
+  negative_cafes: NegativeCafeExtracted[];
+}
+
+async function searchBlogs(city: string, origin: string): Promise<BlogSearchResult> {
   console.log('[Pipeline] searchBlogs() called for city:', city);
   try {
     const res = await fetch(`${origin}/api/search-blogs`, {
@@ -41,14 +99,18 @@ async function searchBlogs(city: string, origin: string): Promise<BlogSnippet[]>
     });
     if (!res.ok) {
       console.error('[Pipeline] Blog search HTTP error:', res.status);
-      return [];
+      return { snippets: [], cafes: [], negative_cafes: [] };
     }
     const data = await res.json();
-    console.log('[Pipeline] Blog search returned:', data.snippets?.length ?? 0, 'work-related snippets');
-    return data.snippets || [];
+    console.log('[Pipeline] Blog search returned:', data.snippets?.length ?? 0, 'snippets,', data.cafes?.length ?? 0, 'extracted cafés,', data.negative_cafes?.length ?? 0, 'negative');
+    return {
+      snippets: data.snippets || [],
+      cafes: data.cafes || [],
+      negative_cafes: data.negative_cafes || [],
+    };
   } catch (e) {
     console.error('[Pipeline] Blog search EXCEPTION:', e);
-    return [];
+    return { snippets: [], cafes: [], negative_cafes: [] };
   }
 }
 
@@ -118,7 +180,7 @@ export async function GET(request: Request) {
 
   // Always fetch from Google Places to discover new cafés
   const rawPlaces = await googleNearbySearch(lat, lng);
-  const cafeTypesGet = ['cafe', 'coffee_shop', 'bakery', 'food', 'restaurant', 'bar'];
+  const cafeTypesGet = ['cafe', 'coffee_shop'];
   const nonCafeKwGet = ['climbing', 'gym', 'fitness', 'hotel', 'hostel', 'pharmacy', 'bank', 'supermarket', 'market', 'pub', 'wine', 'beer'];
   const places = rawPlaces.filter(p => {
     if (!p.types?.some(t => cafeTypesGet.includes(t))) return false;
@@ -310,32 +372,46 @@ export async function POST(request: Request) {
         send({ type: 'status', message: `📰 Searching blogs for best work cafés in ${city}...` });
         console.log('[Pipeline] Starting blog search + nearby search in parallel for:', city);
 
-        const isLondon = city.toLowerCase().includes('london');
+        const searchTier = getTier(city);
+        const cityLower = city.toLowerCase();
 
-        // Run blog search + Google Places nearby in parallel
-        const nearbySearches: Promise<GooglePlace[]>[] = isLondon
-          ? [
-              googleNearbySearch(51.5074, -0.1278),   // Central London
-              googleNearbySearch(51.5250, -0.0740),   // Shoreditch/Hackney
-              googleNearbySearch(51.4613, -0.1156),   // Brixton/Peckham
-            ]
-          : [googleNearbySearch(lat, lng)];
-
-        if (isLondon) {
-          console.log(`[London Special] Running expanded search with 3 neighbourhoods`);
+        // Determine neighbourhood coords based on tier
+        let areaCoords: [string, number, number][];
+        if (searchTier === 1) {
+          areaCoords = LONDON_COORDS;
+        } else if (searchTier === 2) {
+          const match = Object.keys(TIER2_COORDS).find(k => cityLower.includes(k));
+          areaCoords = match ? TIER2_COORDS[match] : [['Centre', lat, lng]];
+        } else {
+          areaCoords = [['Centre', lat, lng]];
         }
 
-        const [blogSnippets, ...nearbyResults] = await Promise.all([
-          searchBlogs(city, origin),
-          ...nearbySearches,
-        ]);
+        console.log(`[Pipeline] Tier ${searchTier}: ${areaCoords.length} area searches`);
 
-        const nearbyPlaces = nearbyResults.flat();
-        console.log('[Pipeline] Blog snippets:', blogSnippets.length, '| Nearby places:', nearbyPlaces.length);
+        // Start blog search immediately
+        const blogPromise = searchBlogs(city, origin);
+
+        // Google Places nearby: batch 5 concurrent, 1s delay
+        const nearbyPlaces: GooglePlace[] = [];
+        for (let i = 0; i < areaCoords.length; i += 5) {
+          const batch = areaCoords.slice(i, i + 5);
+          send({ type: 'status', message: `⭐ Searching ${batch.map(b => b[0]).join(', ')}...` });
+          const results = await Promise.all(batch.map(([, lt, ln]) => googleNearbySearch(lt, ln)));
+          nearbyPlaces.push(...results.flat());
+          if (i + 5 < areaCoords.length) {
+            await new Promise(r => setTimeout(r, 1000));
+          }
+        }
+
+        const blogResult = await blogPromise;
+        const blogSnippets = blogResult.snippets;
+        const blogExtractedCafes = blogResult.cafes;
+        const negativeCafes = blogResult.negative_cafes;
+        console.log('[Pipeline] Blog snippets:', blogSnippets.length, '| Extracted cafés:', blogExtractedCafes.length, '| Negative:', negativeCafes.length, '| Nearby places:', nearbyPlaces.length);
 
         // Build a single blog context string from all snippets
         const blogContextText = blogSnippets.length > 0
-          ? blogSnippets.map(s => `${s.title}: ${s.snippet}`).join('\n')
+          ? blogSnippets.map((s: BlogSnippet) => `${s.title}: ${s.snippet}`).join('\n')
           : '';
 
         // STEP 3: Google Places
@@ -347,24 +423,58 @@ export async function POST(request: Request) {
           if (p.id && !allPlacesMap.has(p.id)) allPlacesMap.set(p.id, p);
         }
 
-        // Filter out non-cafés
-        const cafeTypes = ['cafe', 'coffee_shop', 'bakery', 'food', 'restaurant', 'bar'];
+        // Filter: only keep places with cafe/coffee_shop type
+        const strictCafeTypes = ['cafe', 'coffee_shop'];
         const nonCafeKeywords = ['climbing', 'gym', 'fitness', 'hotel', 'hostel', 'pharmacy', 'bank', 'supermarket', 'market', 'pub', 'wine', 'beer'];
         const allPlaces = Array.from(allPlacesMap.values()).filter(p => {
-          const hasType = p.types?.some(t => cafeTypes.includes(t));
+          const hasType = p.types?.some(t => strictCafeTypes.includes(t));
           if (!hasType) {
-            console.log(`[Filter] Removed ${p.displayName?.text} — no café type`);
+            console.log(`[Type Filter] Removed ${p.displayName?.text} — not a café type: ${p.types?.join(', ')}`);
             return false;
           }
           const nameLower = (p.displayName?.text || '').toLowerCase();
           const badKeyword = nonCafeKeywords.find(kw => nameLower.includes(kw));
           if (badKeyword) {
-            console.log(`[Filter] Removed ${p.displayName?.text} — name contains "${badKeyword}"`);
+            console.log(`[Type Filter] Removed ${p.displayName?.text} — name contains "${badKeyword}"`);
             return false;
           }
+          console.log(`[Type Filter] Kept ${p.displayName?.text}`);
           return true;
         });
-        console.log('[Pipeline] Total unique cafés after filtering:', allPlaces.length, isLondon ? '(London multi-area)' : '');
+        console.log('[Pipeline] Total unique cafés after filtering:', allPlaces.length, searchTier <= 2 ? `(Tier ${searchTier} multi-area)` : '');
+
+        // Build blog match set
+        const normalize = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, '').trim();
+
+        // Use extracted café names if available (London), otherwise fuzzy-match against raw snippets
+        const extractedNames = blogExtractedCafes.map(c => normalize(c.name));
+        const negativeNames = negativeCafes.map(c => normalize(c.name));
+        const blogText = blogSnippets.map((s: BlogSnippet) => normalize(s.title + ' ' + s.snippet)).join(' ');
+        const blogMatchedIds = new Set<string>();
+        const negativeMatchedIds = new Set<string>();
+
+        for (const p of allPlaces) {
+          const name = p.displayName?.text || '';
+          const normName = normalize(name);
+          const words = normName.split(/\s+/).filter(w => w.length > 3);
+
+          // Check extracted café names first (most reliable)
+          const extractedMatch = extractedNames.some(en => en.includes(normName) || normName.includes(en) || (words.length >= 2 && words.filter(w => en.includes(w)).length >= 2));
+          // Fallback: check raw blog text
+          const snippetMatch = blogText.includes(normName) || (words.length >= 2 && words.filter(w => blogText.includes(w)).length >= 2);
+          // Check negative
+          const negMatch = negativeNames.some(nn => nn.includes(normName) || normName.includes(nn) || (words.length >= 2 && words.filter(w => nn.includes(w)).length >= 2));
+
+          if (negMatch) {
+            negativeMatchedIds.add(p.id);
+            console.log(`[Negative Match] '${name}' flagged as laptop-unfriendly`);
+          } else if (extractedMatch || snippetMatch) {
+            blogMatchedIds.add(p.id);
+            console.log(`[Blog Match] '${name}' matched → laptop=true (${extractedMatch ? 'extracted' : 'snippet'})`);
+          } else {
+            console.log(`[Blog No Match] '${name}' had no blog match`);
+          }
+        }
 
         if (allPlaces.length === 0) {
           send({ type: 'status', message: 'No cafés found in this area' });
@@ -422,10 +532,14 @@ export async function POST(request: Request) {
           };
         });
 
+        const tier = getTier(city);
+        const maxEnrich = tier === 1 ? 200 : tier === 2 ? 50 : 15;
+        console.log(`[Pipeline] City: ${city}, Tier: ${tier}, Max enrichment: ${maxEnrich}`);
+
         const toSkip = workItems.filter(w => w.skipEnrichment);
         const toEnrich = workItems
           .filter(w => !w.skipEnrichment && (w.reviewTexts.length >= MIN_REVIEWS_FOR_CLAUDE || blogContextText))
-          .slice(0, MAX_CLAUDE_CALLS);
+          .slice(0, maxEnrich);
         const noEnrich = workItems.filter(w =>
           !w.skipEnrichment && w.reviewTexts.length < MIN_REVIEWS_FOR_CLAUDE && !blogContextText
         );
@@ -472,14 +586,35 @@ export async function POST(request: Request) {
             reason = (w.existing.enrichment_reason as string) || 'cached';
             keyQuote = (w.existing.key_review_quote as string) || null;
           } else {
+            // Negative match = red dot
+            if (negativeMatchedIds.has(w.place.id)) {
+              laptop_allowed = false;
+              confidence = 'inferred';
+              reason = 'Flagged as laptop-unfriendly online';
+            }
+            // Blog match = green dot (overrides unless negative)
+            else if (blogMatchedIds.has(w.place.id)) {
+              laptop_allowed = true;
+              confidence = 'inferred';
+              reason = `Listed in blog posts about working cafés in ${city}`;
+            }
+
             const claudeResult = claudeResults.get(w.place.id);
 
             if (claudeResult) {
-              laptop_allowed = claudeResult.laptop_allowed;
+              // Blog match already set laptop=true; only let Claude override if it says false
+              if (!blogMatchedIds.has(w.place.id)) {
+                laptop_allowed = claudeResult.laptop_allowed;
+              } else if (claudeResult.laptop_allowed === false) {
+                laptop_allowed = false;
+                reason = claudeResult.reason;
+              }
               wifi_rating = claudeResult.wifi_rating;
               seating_rating = claudeResult.seating_rating;
-              confidence = claudeResult.confidence;
-              reason = claudeResult.reason;
+              if (!blogMatchedIds.has(w.place.id)) {
+                confidence = claudeResult.confidence;
+                reason = claudeResult.reason;
+              }
               keyQuote = claudeResult.key_quote;
             }
 
@@ -536,9 +671,44 @@ export async function POST(request: Request) {
           console.log('[Upsert Example]', JSON.stringify(enrichedCafes[0], null, 2));
         }
 
+        // Check which cafés are user-verified (protect their data)
+        const enrichedPlaceIds = enrichedCafes.map(c => c.google_place_id).filter(Boolean);
+        const { data: verifiedRows } = await supabase
+          .from('cafes')
+          .select('google_place_id, user_verified, laptop_allowed, wifi_rating, seating_rating, confidence, enrichment_reason')
+          .in('google_place_id', enrichedPlaceIds)
+          .eq('user_verified', true);
+
+        const verifiedMap = new Map<string, Record<string, unknown>>();
+        if (verifiedRows) {
+          for (const v of verifiedRows) {
+            if (v.google_place_id) verifiedMap.set(v.google_place_id, v);
+          }
+        }
+
+        if (verifiedMap.size > 0) {
+          console.log(`[Pipeline] Protecting ${verifiedMap.size} user-verified cafés from overwrite`);
+        }
+
+        // Preserve user-verified fields
+        const safeCafes = enrichedCafes.map(c => {
+          const verified = verifiedMap.get(c.google_place_id);
+          if (verified) {
+            return {
+              ...c,
+              laptop_allowed: verified.laptop_allowed as boolean | null,
+              wifi_rating: verified.wifi_rating as number | null,
+              seating_rating: verified.seating_rating as number | null,
+              confidence: verified.confidence as string,
+              enrichment_reason: verified.enrichment_reason as string | null,
+            };
+          }
+          return c;
+        });
+
         const { error: upsertError } = await supabase
           .from('cafes')
-          .upsert(enrichedCafes, { onConflict: 'google_place_id' });
+          .upsert(safeCafes, { onConflict: 'google_place_id' });
 
         if (upsertError) {
           console.error('[Pipeline] Upsert error:', upsertError);
