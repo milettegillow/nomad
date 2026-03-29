@@ -350,7 +350,7 @@ export default function Map() {
     } finally {
       setPanLoading(false);
       // Re-show button after 3 seconds
-      setTimeout(() => setShowSearchArea(true), 3000);
+      // Button re-appears on next moveend via the moveend handler
     }
   }, [updateCafes]);
 
@@ -855,7 +855,7 @@ export default function Map() {
 
       {/* Search this area button — top center */}
       {showSearchArea && !panLoading && !statusMessage && !firstSearchCity && !popupOpen && (
-        <div className="absolute left-1/2 -translate-x-1/2 z-20 animate-fade-in" style={{ top: 66 }}>
+        <div className="absolute left-1/2 -translate-x-1/2 z-20" style={{ top: 66 }}>
           <button
             onClick={searchThisArea}
             className="cursor-pointer"
