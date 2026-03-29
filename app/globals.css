@@ -14,7 +14,7 @@ html, body {
 
 /* Mapbox popup */
 .mapboxgl-popup {
-  z-index: 100 !important;
+  z-index: 200 !important;
 }
 
 .mapboxgl-popup-content {

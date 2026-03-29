@@ -442,9 +442,11 @@ export default function Map() {
       el.style.height = "18px";
       el.style.borderRadius = "50%";
       el.style.backgroundColor = markerColor(cafe);
-      el.style.border = "2px solid #fff";
+      el.style.border = darkMode ? "2px solid #3b82f6" : "2px solid rgba(255,255,255,0.8)";
       el.style.cursor = "pointer";
-      el.style.boxShadow = `0 0 8px ${markerColor(cafe)}90, 0 1px 3px rgba(0,0,0,0.4)`;
+      el.style.boxShadow = darkMode
+        ? `0 0 6px ${markerColor(cafe)}80, 0 0 0 1px #3b82f640`
+        : `0 0 6px ${markerColor(cafe)}80`;
       el.style.transition = "background-color 0.5s ease, box-shadow 0.5s ease";
 
       const popup = new mapboxgl.Popup({
