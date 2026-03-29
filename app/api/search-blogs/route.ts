@@ -65,13 +65,15 @@ export async function POST(request: Request) {
   const startTime = Date.now();
 
   try {
-    // Base queries (all tiers)
+    // Base queries (all tiers — includes Reddit)
     const positiveQueries = [
       `best cafes to work from in ${city}`,
       `laptop friendly cafes ${city} wifi`,
       `best coffee shops remote work ${city}`,
       `site:reddit.com best cafes work ${city}`,
       `site:reddit.com ${city} cafe laptop wifi`,
+      `site:reddit.com ${city} cafe wifi laptop working`,
+      `site:reddit.com best coffee shop ${city} study`,
     ];
 
     // Tier 2 additions
@@ -155,8 +157,8 @@ export async function POST(request: Request) {
         const res = await anthropic.messages.create({
           model: 'claude-sonnet-4-20250514',
           max_tokens: 4096,
-          system: 'Extract ALL café names. Return ONLY valid JSON, no markdown.',
-          messages: [{ role: 'user', content: `Extract ALL café names from these search results that are explicitly mentioned as good for working, laptops, wifi, or remote work in ${city}. Include every café name you can find.\n\nSearch results:\n${posContext}\n\nReturn ONLY valid JSON:\n{ "cafes": [{ "name": "...", "area": "...", "laptop_notes": "...", "wifi_notes": "...", "source_url": "..." }] }` }],
+          system: 'You are extracting café names from search results. Be VERY generous — extract ANY café, coffee shop, or workspace that is mentioned positively in the context of working, wifi, laptops, or studying. Include cafés mentioned in passing comments, not just dedicated blog posts. For Reddit results especially, extract any café name mentioned even once in a positive working context. Return ONLY valid JSON, no markdown.',
+          messages: [{ role: 'user', content: `Extract ALL café names from these search results about ${city}. Include every café, coffee shop, or coworking space mentioned in a positive work context — even if only mentioned once in a Reddit comment.\n\nSearch results:\n${posContext}\n\nReturn ONLY valid JSON:\n{ "cafes": [{ "name": "...", "area": "...", "laptop_notes": "...", "wifi_notes": "...", "source_url": "..." }] }` }],
         });
         const text = res.content[0];
         if (text.type === 'text') {
