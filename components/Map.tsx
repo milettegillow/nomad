@@ -157,6 +157,7 @@ export default function Map() {
         console.log('[Cafes] Merged', toAdd.length, 'new, total:', allCafesRef.current.length);
       }
     }
+    console.log('[updateCafes] Setting state with', allCafesRef.current.length, 'cafés, replace:', replace);
     setCafes([...allCafesRef.current]);
   }, []);
 
@@ -182,6 +183,8 @@ export default function Map() {
         map.current.setStyle(next ? DARK_STYLE : LIGHT_STYLE);
       }
       document.body.classList.toggle("nomad-dark", next);
+      const meta = document.querySelector('#theme-color-meta');
+      if (meta) meta.setAttribute('content', next ? '#1a1a1a' : '#ffffff');
       return next;
     });
   }, []);
@@ -275,7 +278,11 @@ export default function Map() {
                 clearInterval(progressInterval.current);
                 setProgress(100);
                 setFirstSearchCity(null);
-                updateCafes(event.cafes as Cafe[], true);
+                const receivedCafes = event.cafes as Cafe[];
+                console.log('[Map] SSE cafes event received:', receivedCafes.length, 'cafés');
+                console.log('[Map] First café:', receivedCafes[0]?.name, 'at', receivedCafes[0]?.lat, receivedCafes[0]?.lng);
+                console.log('[Map] map.current exists:', !!map.current);
+                updateCafes(receivedCafes, true);
                 lastSearchCenter.current = { lat, lng };
                 hasInitialSearch.current = true;
                 setShowSearchArea(false);
@@ -461,7 +468,10 @@ export default function Map() {
 
   // Update markers
   useEffect(() => {
-    if (!map.current) return;
+    if (!map.current) {
+      console.log('[Markers] Skipped — map not ready, cafes:', cafes.length);
+      return;
+    }
 
     console.log('[Markers] Rendering', cafes.length, 'cafés');
     markersRef.current.forEach(({ marker }) => marker.remove());
@@ -645,76 +655,50 @@ export default function Map() {
         />
       </div>
 
-      {/* Top-right button group: [🌙] [📍 My location] */}
+      {/* Top-right buttons */}
       <div
         className="absolute z-20"
         style={{ top: 10, right: 10, display: "flex", gap: 8 }}
       >
+        {/* Dark mode toggle */}
         <button
           onClick={toggleDarkMode}
           className="cursor-pointer"
           style={{
-            height: 46,
-            borderRadius: 8,
+            height: 40,
+            width: 40,
+            borderRadius: 20,
             boxShadow: cardShadow,
             border: btnBorder,
             background: btnBg,
-            padding: "0 12px",
             display: "flex",
             alignItems: "center",
-            gap: 0,
+            justifyContent: "center",
+            fontSize: 18,
           }}
           title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
         >
-          <div
-            style={{
-              width: 52,
-              height: 28,
-              borderRadius: 14,
-              background: darkMode ? "#333" : "#e0e0e0",
-              position: "relative",
-              transition: "background 0.25s",
-              flexShrink: 0,
-            }}
-          >
-            <div
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: "50%",
-                background: "#fff",
-                position: "absolute",
-                top: 3,
-                left: darkMode ? 27 : 3,
-                transition: "left 0.25s",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 12,
-              }}
-            >
-              {darkMode ? "🌙" : "☀️"}
-            </div>
-          </div>
+          {darkMode ? "🌙" : "☀️"}
         </button>
+        {/* My location — hidden on mobile */}
         <button
           onClick={handleMyLocation}
-          className="transition-colors cursor-pointer"
+          className="hidden sm:flex transition-colors cursor-pointer"
           style={{
-            height: 46,
-            padding: "0 16px",
-            borderRadius: 8,
+            height: 40,
+            padding: "0 14px",
+            borderRadius: 20,
             boxShadow: cardShadow,
             border: btnBorder,
             background: btnBg,
             color: btnText,
-            fontSize: 16,
+            fontSize: 14,
+            alignItems: "center",
+            gap: 4,
           }}
           title="Go to my location"
         >
-          <span>📍</span>
-          <span className="hidden sm:inline"> My location</span>
+          📍 My location
         </button>
       </div>
 
@@ -882,7 +866,7 @@ export default function Map() {
       )}
 
       {/* Filter toolbar — bottom center */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20">
+      <div className="absolute left-1/2 -translate-x-1/2 z-20 bottom-6 sm:bottom-6" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
         <Filters filters={filters} onChange={setFilters} dark={darkMode} />
       </div>
 

@@ -118,8 +118,8 @@ export default function CorrectionPanel({
   if (success) {
     return (
       <div
-        className="absolute bottom-0 left-0 right-0 z-20 animate-slide-up"
-        style={{ background: d ? '#1a1a1a' : '#fff', borderTop: `1px solid ${d ? '#333' : '#e8e8e8'}`, padding: 24 }}
+        className="fixed bottom-0 left-0 right-0 animate-slide-up"
+        style={{ background: d ? '#1a1a1a' : '#fff', borderTop: `1px solid ${d ? '#333' : '#e8e8e8'}`, padding: 24, paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))', zIndex: 1001 }}
       >
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 24, marginBottom: 8, color: '#16a34a' }}>✓</div>
@@ -133,18 +133,20 @@ export default function CorrectionPanel({
   return (
     <>
       <div
-        className="absolute inset-0 z-10"
-        style={{ background: d ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.2)' }}
+        className="fixed inset-0"
+        style={{ background: d ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.2)', zIndex: 1000 }}
         onClick={onClose}
       />
       <div
-        className="absolute bottom-0 left-0 right-0 z-20 rounded-t-2xl animate-slide-up"
+        className="fixed bottom-0 left-0 right-0 rounded-t-2xl animate-slide-up"
         style={{
           background: d ? '#1a1a1a' : '#fff',
           borderTop: `1px solid ${d ? '#333' : '#e8e8e8'}`,
           padding: 24,
-          maxHeight: '70vh',
+          paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))',
+          maxHeight: '85vh',
           overflowY: 'auto',
+          zIndex: 1001,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>

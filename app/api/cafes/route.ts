@@ -268,7 +268,7 @@ export async function POST(request: Request) {
         console.log('[Pipeline] Start for city:', city, 'at', lat, lng);
 
         // STEP 1: Check city cache
-        send({ type: 'status', message: `📍 Checking cache for ${city}...` });
+        send({ type: 'status', message: `📍 Finding cafés in ${city}...` });
 
         const { data: cached } = await supabase
           .from('city_searches')
@@ -286,7 +286,7 @@ export async function POST(request: Request) {
               .in('id', cached.cafe_ids);
 
             if (cachedCafes && cachedCafes.length > 0) {
-              send({ type: 'status', message: `✓ ${cachedCafes.length} cafés loaded from cache` });
+              send({ type: 'status', message: `✓ Found ${cachedCafes.length} cafés in ${city}` });
               send({ type: 'cafes', cafes: cachedCafes, cached: true });
               send({ type: 'complete' });
               supabase.from('analytics_events').insert({ event_type: 'city_search', city_name: city, metadata: { cafe_count: cachedCafes.length, was_cached: true, is_first_search: false } }).then(() => {}, () => {});
@@ -490,7 +490,7 @@ export async function POST(request: Request) {
         });
 
         // STEP 5: Save to Supabase
-        send({ type: 'status', message: `💾 Saving ${enrichedCafes.length} cafés...` });
+        // Save silently — no status message for saving
 
         if (enrichedCafes.length > 0) {
           console.log('[Upsert Example]', JSON.stringify(enrichedCafes[0], null, 2));

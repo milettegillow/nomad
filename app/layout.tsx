@@ -20,6 +20,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${geist.variable} h-full`}>
+      <head>
+        <meta name="theme-color" content="#ffffff" id="theme-color-meta" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+      </head>
       <body className="h-full m-0 p-0 bg-black text-white font-[var(--font-geist)] antialiased">
         {children}
       </body>
