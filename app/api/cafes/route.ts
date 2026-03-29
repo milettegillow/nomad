@@ -289,6 +289,7 @@ export async function POST(request: Request) {
               send({ type: 'status', message: `✓ ${cachedCafes.length} cafés loaded from cache` });
               send({ type: 'cafes', cafes: cachedCafes, cached: true });
               send({ type: 'complete' });
+              supabase.from('analytics_events').insert({ event_type: 'city_search', city_name: city, metadata: { cafe_count: cachedCafes.length, was_cached: true, is_first_search: false } }).then(() => {}, () => {});
               controller.close();
               return;
             }
@@ -536,6 +537,7 @@ export async function POST(request: Request) {
         send({ type: 'status', message: `✓ Found ${finalCafes.length} cafés` });
         send({ type: 'cafes', cafes: finalCafes, cached: false });
         send({ type: 'complete' });
+        supabase.from('analytics_events').insert({ event_type: 'city_search', city_name: city, metadata: { cafe_count: finalCafes.length, was_cached: false, is_first_search: true } }).then(() => {}, () => {});
 
       } catch (e) {
         console.error('[Pipeline] Error:', e);

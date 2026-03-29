@@ -65,6 +65,7 @@ export async function POST(request: Request) {
     }
 
     console.log('[Submissions] Insert OK');
+    supabase.from('analytics_events').insert({ event_type: 'correction_submitted', city_name: null, metadata: { laptop_allowed, has_wifi_rating: wifi_rating !== null, has_seating_rating: seating_rating !== null, has_notes: !!notes } }).then(() => {}, () => {});
 
     // Immediately update café with submitted values (first submission takes effect)
     const cafeUpdate: Record<string, unknown> = {};

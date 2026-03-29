@@ -107,6 +107,7 @@ export async function GET(request: Request) {
     }
 
     console.log('[Search Place] Returned', results.length, 'cafés, all saved to Supabase');
+    supabase.from('analytics_events').insert({ event_type: 'cafe_search', city_name: null, metadata: { query: q } }).then(() => {}, () => {});
     return Response.json({ results });
   } catch (e) {
     console.error('[Search Place] Error:', e);
