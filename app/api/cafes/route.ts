@@ -447,10 +447,10 @@ export async function POST(request: Request) {
         const normalize = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, '').trim();
 
         // Use extracted café names if available (London), otherwise fuzzy-match against raw snippets
-        const extractedNames = blogExtractedCafes.map(c => normalize(c.name));
         const negativeNames = negativeCafes.map(c => normalize(c.name));
         const blogText = blogSnippets.map((s: BlogSnippet) => normalize(s.title + ' ' + s.snippet)).join(' ');
         const blogMatchedIds = new Set<string>();
+        const blogMatchData = new Map<string, BlogCafeExtracted>(); // placeId → matched blog café data
         const negativeMatchedIds = new Set<string>();
 
         for (const p of allPlaces) {
@@ -458,8 +458,11 @@ export async function POST(request: Request) {
           const normName = normalize(name);
           const words = normName.split(/\s+/).filter(w => w.length > 3);
 
-          // Check extracted café names first (most reliable)
-          const extractedMatch = extractedNames.some(en => en.includes(normName) || normName.includes(en) || (words.length >= 2 && words.filter(w => en.includes(w)).length >= 2));
+          // Check extracted café names first (most reliable) — also find which one matched
+          const matchedExtracted = blogExtractedCafes.find(c => {
+            const en = normalize(c.name);
+            return en.includes(normName) || normName.includes(en) || (words.length >= 2 && words.filter(w => en.includes(w)).length >= 2);
+          });
           // Fallback: check raw blog text
           const snippetMatch = blogText.includes(normName) || (words.length >= 2 && words.filter(w => blogText.includes(w)).length >= 2);
           // Check negative
@@ -468,9 +471,10 @@ export async function POST(request: Request) {
           if (negMatch) {
             negativeMatchedIds.add(p.id);
             console.log(`[Negative Match] '${name}' flagged as laptop-unfriendly`);
-          } else if (extractedMatch || snippetMatch) {
+          } else if (matchedExtracted || snippetMatch) {
             blogMatchedIds.add(p.id);
-            console.log(`[Blog Match] '${name}' matched → laptop=true (${extractedMatch ? 'extracted' : 'snippet'})`);
+            if (matchedExtracted) blogMatchData.set(p.id, matchedExtracted);
+            console.log(`[Blog Match] '${name}' matched → laptop=true (${matchedExtracted ? 'extracted' : 'snippet'})`);
           } else {
             console.log(`[Blog No Match] '${name}' had no blog match`);
           }
@@ -597,6 +601,12 @@ export async function POST(request: Request) {
               laptop_allowed = true;
               confidence = 'inferred';
               reason = `Listed in blog posts about working cafés in ${city}`;
+              const blogData = blogMatchData.get(w.place.id);
+              if (blogData) {
+                if (blogData.laptop_notes || blogData.wifi_notes) {
+                  keyQuote = blogData.laptop_notes || blogData.wifi_notes;
+                }
+              }
             }
 
             const claudeResult = claudeResults.get(w.place.id);
@@ -655,7 +665,7 @@ export async function POST(request: Request) {
             foursquare_rating: null as number | null,
             confidence,
             last_updated: new Date().toISOString(),
-            blog_sources: null as string[] | null,
+            blog_sources: blogMatchData.get(w.place.id)?.source_url ? [blogMatchData.get(w.place.id)!.source_url!] : null as string[] | null,
             work_summary: null as string | null,
             enrichment_reason: reason,
             key_review_quote: keyQuote,
