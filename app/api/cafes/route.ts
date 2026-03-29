@@ -10,8 +10,8 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_REVIEWS_FOR_CLAUDE = 3;
 const ENRICHMENT_BATCH_SIZE = 5;
 
-const TIER1_CITIES = ['london'];
-const TIER2_CITIES = ['paris', 'berlin', 'barcelona', 'lisbon', 'amsterdam', 'new york', 'bangkok', 'bali', 'tokyo', 'singapore', 'melbourne', 'medellin', 'medellín', 'rome', 'prague', 'budapest'];
+const TIER1_CITIES = ['london', 'londres'];
+const TIER2_CITIES = ['paris', 'berlin', 'barcelona', 'lisbon', 'lisboa', 'amsterdam', 'new york', 'bangkok', 'bali', 'tokyo', 'singapore', 'melbourne', 'medellin', 'medellín', 'rome', 'roma', 'prague', 'praha', 'budapest'];
 
 function getTier(city: string): number {
   const c = city.toLowerCase();

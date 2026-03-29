@@ -6,8 +6,14 @@ const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
 const WORK_KEYWORDS = ['work', 'coworking', 'laptop', 'wifi', 'wi-fi', 'telework', 'nomad', 'remote work', 'study', 'freelanc', 'digital nomad', 'outlet', 'plug'];
 
-const TIER1_CITIES = ['london'];
-const TIER2_CITIES = ['paris', 'berlin', 'barcelona', 'lisbon', 'amsterdam', 'new york', 'bangkok', 'bali', 'tokyo', 'singapore', 'melbourne', 'medellin', 'medellín', 'rome', 'prague', 'budapest'];
+const TIER1_CITIES = ['london', 'londres'];
+const TIER2_CITIES = ['paris', 'berlin', 'barcelona', 'lisbon', 'lisboa', 'amsterdam', 'new york', 'bangkok', 'bali', 'tokyo', 'singapore', 'melbourne', 'medellin', 'medellín', 'rome', 'roma', 'prague', 'praha', 'budapest'];
+
+const CITY_NAME_MAP: Record<string, string> = {
+  lisboa: 'Lisbon', roma: 'Rome', praha: 'Prague', münchen: 'Munich',
+  wien: 'Vienna', köln: 'Cologne', moskva: 'Moscow', londres: 'London',
+};
+const normalizeCity = (city: string) => CITY_NAME_MAP[city.toLowerCase()] || city;
 
 const TIER2_AREAS: Record<string, string[]> = {
   paris: ['Marais', 'Montmartre', 'Saint-Germain', 'Bastille', 'Belleville'],
@@ -39,15 +45,27 @@ function getTier(city: string): number {
 interface BraveResult { title: string; url: string; description: string; }
 
 async function braveSearch(query: string): Promise<BraveResult[]> {
+  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=10`;
   try {
-    const res = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=10`, {
+    console.log('[Brave] Calling:', query.substring(0, 60), '| Key exists:', !!BRAVE_SEARCH_API_KEY);
+    const res = await fetch(url, {
       headers: { 'Accept': 'application/json', 'Accept-Encoding': 'gzip', 'X-Subscription-Token': BRAVE_SEARCH_API_KEY },
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      console.error('[Brave] Error:', res.status, errBody.substring(0, 200));
+      return [];
+    }
     const data = await res.json();
-    return (data.web?.results || []).map((r: { title: string; url: string; description: string }) => ({
+    const results = (data.web?.results || []).map((r: { title: string; url: string; description: string }) => ({
       title: r.title || '', url: r.url || '', description: r.description || '',
     }));
+    if (results.length > 0) {
+      console.log(`[Brave] Got ${results.length} results for: "${query.substring(0, 50)}"`);
+    } else {
+      console.log(`[Brave] 0 results for: "${query.substring(0, 50)}"`);
+    }
+    return results;
   } catch { return []; }
 }
 
@@ -60,35 +78,36 @@ export async function POST(request: Request) {
   if (!city) return Response.json({ error: 'city required' }, { status: 400 });
 
   const tier = getTier(city);
+  const searchCity = normalizeCity(city); // Use English name for search queries
   const cityLower = city.toLowerCase();
-  console.log(`[Search Blogs] City: ${city}, Tier: ${tier}`);
+  console.log(`[Search Blogs] City: ${city} → searchCity: ${searchCity}, Tier: ${tier}`);
   const startTime = Date.now();
 
   try {
     // Base queries (all tiers — includes Reddit)
     const positiveQueries = [
-      `best cafes to work from in ${city}`,
-      `laptop friendly cafes ${city} wifi`,
-      `best coffee shops remote work ${city}`,
-      `site:reddit.com best cafes work ${city}`,
-      `site:reddit.com ${city} cafe laptop wifi`,
-      `site:reddit.com ${city} cafe wifi laptop working`,
-      `site:reddit.com best coffee shop ${city} study`,
+      `best cafes to work from in ${searchCity}`,
+      `laptop friendly cafes ${searchCity} wifi`,
+      `best coffee shops remote work ${searchCity}`,
+      `site:reddit.com best cafes work ${searchCity}`,
+      `site:reddit.com ${searchCity} cafe laptop wifi`,
+      `site:reddit.com ${searchCity} cafe wifi laptop working`,
+      `site:reddit.com best coffee shop ${searchCity} study`,
     ];
 
     // Tier 2 additions
     if (tier <= 2) {
       positiveQueries.push(
-        `digital nomad cafes ${city}`,
-        `best coworking cafes ${city}`,
-        `best cafes to study in ${city}`,
-        `freelancer cafes ${city}`,
-        `best independent cafes ${city} wifi`,
+        `digital nomad cafes ${searchCity}`,
+        `best coworking cafes ${searchCity}`,
+        `best cafes to study in ${searchCity}`,
+        `freelancer cafes ${searchCity}`,
+        `best independent cafes ${searchCity} wifi`,
       );
       // Neighbourhood queries
       const areas = tier === 1 ? LONDON_AREAS : (TIER2_AREAS[cityLower] || []);
       for (const area of areas) {
-        positiveQueries.push(`best cafes to work from in ${area} ${city}`);
+        positiveQueries.push(`best cafes to work from in ${area} ${searchCity}`);
       }
     }
 
@@ -108,14 +127,14 @@ export async function POST(request: Request) {
 
     // Negative queries (all tiers)
     const negativeQueries = [
-      `site:reddit.com ${city} cafe no laptops`,
-      `${city} cafe no laptop policy`,
-      `${city} cafe asked to leave working`,
+      `site:reddit.com ${searchCity} cafe no laptops`,
+      `${searchCity} cafe no laptop policy`,
+      `${searchCity} cafe asked to leave working`,
     ];
     if (tier <= 2) {
       negativeQueries.push(
-        `${city} cafe time limit laptop`,
-        `${city} cafe anti laptop`,
+        `${searchCity} cafe time limit laptop`,
+        `${searchCity} cafe anti laptop`,
       );
     }
     if (tier === 1) {
@@ -158,7 +177,7 @@ export async function POST(request: Request) {
           model: 'claude-sonnet-4-20250514',
           max_tokens: 4096,
           system: 'You are extracting café names from search results. Be VERY generous — extract ANY café, coffee shop, or workspace that is mentioned positively in the context of working, wifi, laptops, or studying. Include cafés mentioned in passing comments, not just dedicated blog posts. For Reddit results especially, extract any café name mentioned even once in a positive working context. Return ONLY valid JSON, no markdown.',
-          messages: [{ role: 'user', content: `Extract ALL café names from these search results about ${city}. Include every café, coffee shop, or coworking space mentioned in a positive work context — even if only mentioned once in a Reddit comment.\n\nSearch results:\n${posContext}\n\nReturn ONLY valid JSON:\n{ "cafes": [{ "name": "...", "area": "...", "laptop_notes": "...", "wifi_notes": "...", "source_url": "..." }] }` }],
+          messages: [{ role: 'user', content: `Extract ALL café names from these search results about ${searchCity}. Include every café, coffee shop, or coworking space mentioned in a positive work context — even if only mentioned once in a Reddit comment.\n\nSearch results:\n${posContext}\n\nReturn ONLY valid JSON:\n{ "cafes": [{ "name": "...", "area": "...", "laptop_notes": "...", "wifi_notes": "...", "source_url": "..." }] }` }],
         });
         const text = res.content[0];
         if (text.type === 'text') {
@@ -178,7 +197,7 @@ export async function POST(request: Request) {
           model: 'claude-sonnet-4-20250514',
           max_tokens: 2048,
           system: 'Extract café names mentioned negatively. Return ONLY valid JSON, no markdown.',
-          messages: [{ role: 'user', content: `Extract café names mentioned NEGATIVELY for working in ${city} — no laptops, time limits, asked to leave, no wifi.\n\nSearch results:\n${negContext}\n\nReturn ONLY valid JSON:\n{ "negative_cafes": [{ "name": "...", "issue": "...", "source_url": "..." }] }` }],
+          messages: [{ role: 'user', content: `Extract café names mentioned NEGATIVELY for working in ${searchCity} — no laptops, time limits, asked to leave, no wifi.\n\nSearch results:\n${negContext}\n\nReturn ONLY valid JSON:\n{ "negative_cafes": [{ "name": "...", "issue": "...", "source_url": "..." }] }` }],
         });
         const text = res.content[0];
         if (text.type === 'text') {

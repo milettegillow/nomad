@@ -676,35 +676,37 @@ export default function Map() {
         </div>
       </div>
 
-      {/* Top-right buttons — hidden on mobile */}
-      <div
-        className="absolute z-20 hidden sm:flex"
-        style={{ top: 10, right: 10, gap: 8 }}
+      {/* Dark mode toggle — fixed position */}
+      <button
+        onClick={toggleDarkMode}
+        style={{
+          position: 'fixed',
+          top: 12,
+          right: 140,
+          zIndex: 100,
+          background: darkMode ? '#1a1a1a' : 'white',
+          border: darkMode ? '1px solid #333' : '1px solid #e0e0e0',
+          borderRadius: 9999,
+          padding: '8px 16px',
+          cursor: 'pointer',
+          fontSize: 18,
+          boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: 40,
+          minWidth: 56,
+        }}
+        title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
       >
-        {/* Dark mode toggle */}
-        <button
-          onClick={toggleDarkMode}
-          className="cursor-pointer"
-          style={{
-            height: 40,
-            width: 40,
-            borderRadius: 20,
-            boxShadow: cardShadow,
-            border: btnBorder,
-            background: btnBg,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 18,
-          }}
-          title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
-        >
-          {darkMode ? "🌙" : "☀️"}
-        </button>
-        {/* My location — hidden on mobile */}
+        {darkMode ? '🌙' : '☀️'}
+      </button>
+
+      {/* My location — hidden on mobile */}
+      <div className="absolute z-20 hidden sm:flex" style={{ top: 10, right: 10 }}>
         <button
           onClick={handleMyLocation}
-          className="hidden sm:flex transition-colors cursor-pointer"
+          className="transition-colors cursor-pointer"
           style={{
             height: 40,
             padding: "0 14px",
