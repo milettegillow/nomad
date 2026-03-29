@@ -445,7 +445,7 @@ export default function Map() {
       el.style.border = "2px solid #fff";
       el.style.cursor = "pointer";
       el.style.boxShadow = `0 0 8px ${markerColor(cafe)}90, 0 1px 3px rgba(0,0,0,0.4)`;
-      el.style.transition = "background-color 0.3s, box-shadow 0.3s";
+      el.style.transition = "background-color 0.5s ease, box-shadow 0.5s ease";
 
       const popup = new mapboxgl.Popup({
         offset: 12,
@@ -842,17 +842,35 @@ export default function Map() {
           darkMode={darkMode}
           onClose={() => {
             setCorrectionCafe(null);
-            // Flush updated café data to state → markers re-render with new colors
             setCafes([...allCafesRef.current]);
           }}
-          onSubmitted={(updates) => {
-            // Update ref silently — don't trigger re-render yet (keeps popup open)
+          onUpdate={(updates) => {
+            // Optimistic: update marker color + popup content instantly
             const cafeId = correctionCafe.id;
+            const entry = markersRef.current.get(cafeId);
+            if (entry) {
+              const newColor = updates.laptop_allowed === true ? '#34a853' : updates.laptop_allowed === false ? '#ea4335' : '#fbbc04';
+              entry.el.style.backgroundColor = newColor;
+              entry.el.style.boxShadow = `0 0 0 4px ${newColor}40, 0 0 12px ${newColor}`;
+              setTimeout(() => {
+                entry.el.style.boxShadow = `0 0 8px ${newColor}90, 0 1px 3px rgba(0,0,0,0.4)`;
+              }, 1500);
+
+              // Update popup HTML in place
+              const reason = updates.notes ? `Reported by a user: ${updates.notes}` : 'Reported by a user';
+              const updatedCafe: Cafe = { ...correctionCafe, ...updates, confidence: 'inferred', enrichment_reason: reason };
+              entry.marker.getPopup()?.setHTML(popupHTML(updatedCafe, darkMode));
+            }
+
+            // Update ref
             allCafesRef.current = allCafesRef.current.map(c =>
               c.id === cafeId
-                ? { ...c, ...updates, confidence: 'inferred' as const, enrichment_reason: 'User submission' }
+                ? { ...c, ...updates, confidence: 'inferred' as const, enrichment_reason: updates.notes ? `Reported by a user: ${updates.notes}` : 'Reported by a user' }
                 : c
             );
+          }}
+          onSubmitted={() => {
+            // API call completed — ref already updated by onUpdate
           }}
         />
       )}

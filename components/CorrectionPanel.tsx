@@ -27,6 +27,15 @@ export default function CorrectionPanel({
 
   const submit = async () => {
     setSubmitting(true);
+
+    // Optimistic update — instantly change marker color + popup content
+    const updates: { laptop_allowed?: boolean | null; wifi_rating?: number | null; seating_rating?: number | null; notes?: string } = {};
+    if (laptopAllowed !== null) updates.laptop_allowed = laptopAllowed;
+    if (wifiRating !== null) updates.wifi_rating = wifiRating;
+    if (seatingRating !== null) updates.seating_rating = seatingRating;
+    if (notes) updates.notes = notes;
+    onUpdate(updates);
+
     try {
       await fetch('/api/submissions', {
         method: 'POST',
@@ -40,15 +49,9 @@ export default function CorrectionPanel({
         }),
       });
       setSuccess(true);
-
-      // Immediately update the marker via parent state
-      const updates: { laptop_allowed?: boolean | null; wifi_rating?: number | null; seating_rating?: number | null } = {};
-      if (laptopAllowed !== null) updates.laptop_allowed = laptopAllowed;
-      if (wifiRating !== null) updates.wifi_rating = wifiRating;
-      if (seatingRating !== null) updates.seating_rating = seatingRating;
       onSubmitted(updates);
 
-      // Close panel after 2 seconds — popup stays open
+      // Close panel after 3 seconds — popup stays open
       setTimeout(onClose, 3000);
     } catch {
       setSubmitting(false);
