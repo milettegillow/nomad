@@ -610,9 +610,9 @@ export async function POST(request: Request) {
           for (let j = 0; j < batch.length; j++) {
             claudeResults.set(batch[j].place.id, results[j]);
           }
-          // Rate limit: 2s delay between batches
+          // Rate limit: 8s delay between batches to avoid 429s
           if (i + ENRICHMENT_BATCH_SIZE < toEnrich.length) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 8000));
           }
         }
 
@@ -776,12 +776,13 @@ export async function POST(request: Request) {
           console.log(`[Pipeline] Protected ${protectedCount} cafés from data downgrade`);
         }
 
+        console.log('[Upsert] Attempting to save', safeCafes.length, 'cafés');
         const { error: upsertError } = await supabase
           .from('cafes')
           .upsert(safeCafes, { onConflict: 'google_place_id' });
 
         if (upsertError) {
-          console.error('[Pipeline] Upsert error:', upsertError);
+          console.error('[Upsert ERROR]', upsertError.message, upsertError.details);
           const tempCafes = enrichedCafes.map((c, i) => ({ ...c, id: `temp-${i}` }));
           send({ type: 'cafes', cafes: tempCafes, cached: false });
           send({ type: 'complete' });
@@ -789,21 +790,20 @@ export async function POST(request: Request) {
           return;
         }
 
-        // Re-fetch to get real IDs
-        const latDelta = 0.025;
-        const lngDelta = 0.025 / Math.cos((lat * Math.PI) / 180);
+        console.log('[Upsert] Done — saved', safeCafes.length, 'cafés');
+
+        // Re-fetch all upserted cafés by google_place_id to get real IDs
+        const upsertedPlaceIds = safeCafes.map(c => c.google_place_id).filter(Boolean);
         const { data: savedCafes } = await supabase
           .from('cafes')
           .select('*')
-          .gte('lat', lat - latDelta)
-          .lte('lat', lat + latDelta)
-          .gte('lng', lng - lngDelta)
-          .lte('lng', lng + lngDelta);
+          .in('google_place_id', upsertedPlaceIds);
 
         const finalCafes = savedCafes || [];
 
-        // Save city search cache
+        // Save city search cache with ALL café IDs
         const cafeIds = finalCafes.map(c => c.id);
+        console.log('[city_searches] Saving', cafeIds.length, 'café IDs for', city);
         await supabase
           .from('city_searches')
           .upsert(
