@@ -86,9 +86,9 @@ function popupHTML(cafe: Cafe, dark: boolean) {
 
   return `
     <div style="font-family:system-ui;color:${text};min-width:240px;background:${bg};border:${popupBorder};border-radius:12px;padding:16px">
-      ${cafe.photo_name ? `<div style="margin:-16px -16px 12px -16px"><img src="/api/photo?name=${encodeURIComponent(cafe.photo_name)}" alt="" style="width:100%;height:140px;object-fit:cover;border-radius:12px 12px 0 0;display:block" /></div>` : ""}
       <div style="font-weight:700;font-size:16px;margin-bottom:6px;color:${nameColor}">${cafe.name}</div>
       ${cafe.address ? `<div style="font-size:14px;color:${addrColor};margin-bottom:12px;line-height:1.4">${cafe.address}</div>` : ""}
+      ${cafe.photo_name ? `<img src="/api/photo?name=${encodeURIComponent(cafe.photo_name)}" alt="" style="width:100%;height:160px;object-fit:cover;border-radius:8px;margin:8px 0 12px 0;display:block" />` : ""}
       ${cafe.google_rating != null ? `<div style="font-size:26px;margin-bottom:10px;line-height:1">⭐ ${cafe.google_rating.toFixed(1)}</div>` : ""}
       <div style="font-size:15px;margin-bottom:7px;line-height:1.6">Laptop: ${laptopLabel(cafe, dark)}</div>
       <div style="font-size:15px;margin-bottom:7px;line-height:1.6">WiFi: ${wifiLabel(cafe, dark)}</div>
@@ -126,6 +126,7 @@ export default function Map() {
   });
   const [loadingCafes, setLoadingCafes] = useState(false);
   const [panLoading, setPanLoading] = useState(false);
+  const [popupOpen, setPopupOpen] = useState(false);
   const [showSearchArea, setShowSearchArea] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [firstSearchCity, setFirstSearchCity] = useState<string | null>(null);
@@ -196,6 +197,7 @@ export default function Map() {
           const entry = markersRef.current.get(cafeId);
           if (entry && !entry.marker.getPopup()?.isOpen()) {
             entry.marker.togglePopup();
+            map.current?.easeTo({ center: [entry.cafe.lng, entry.cafe.lat], offset: [0, 200], duration: 300 });
           }
           activePopupCafeIdRef.current = null;
         }
@@ -448,10 +450,13 @@ export default function Map() {
       const popup = new mapboxgl.Popup({
         offset: 12,
         closeButton: true,
-        maxWidth: "320px",
+        maxWidth: "340px",
         anchor: "bottom",
         className: "nomad-popup",
       }).setHTML(popupHTML(cafe, darkMode));
+
+      popup.on('open', () => setPopupOpen(true));
+      popup.on('close', () => setPopupOpen(false));
 
       const marker = new mapboxgl.Marker(el)
         .setLngLat([cafe.lng, cafe.lat])
@@ -459,7 +464,7 @@ export default function Map() {
         .addTo(map.current!);
 
       el.addEventListener("click", () => {
-        map.current?.panTo([cafe.lng, cafe.lat], { offset: [0, 150] });
+        map.current?.easeTo({ center: [cafe.lng, cafe.lat], offset: [0, 200], duration: 300 });
       });
 
       markersRef.current.set(cafe.id, { marker, el, cafe });
@@ -467,9 +472,75 @@ export default function Map() {
 
   }, [cafes, filters, darkMode]);
 
-  const handleSearch = (lng: number, lat: number, cityName: string) => {
+  const handleCitySearch = (lng: number, lat: number, cityName: string) => {
     flyToAndSearch(lng, lat, cityName);
   };
+
+  const handleCafeSearch = useCallback(async (lat: number, lng: number, placeId: string, cafeName: string, rating: number | null, address: string | null, photoName: string | null) => {
+    if (!map.current) return;
+    skipNextMoveEnd.current = true;
+    setOverlayDismissed(true);
+    map.current.flyTo({ center: [lng, lat], zoom: 16, duration: 1500 });
+
+    // Create a placeholder café with data from search
+    const placeholderCafe: Cafe = {
+      id: `search-${placeId}`,
+      name: cafeName,
+      lat,
+      lng,
+      address: address || undefined,
+      google_place_id: placeId,
+      laptop_allowed: null,
+      wifi_rating: null,
+      seating_rating: null,
+      google_rating: rating,
+      foursquare_rating: null,
+      confidence: 'unconfirmed',
+      last_updated: new Date().toISOString(),
+      photo_name: photoName || undefined,
+    };
+
+    // Add placeholder immediately so a marker appears
+    updateCafes([placeholderCafe], false);
+    hasInitialSearch.current = true;
+    lastSearchCenter.current = { lat, lng };
+
+    // Load nearby cafés
+    try {
+      const res = await fetch(`/api/cafes?lat=${lat}&lng=${lng}`);
+      if (res.ok) {
+        const nearbyCafes = await res.json() as Cafe[];
+        if (Array.isArray(nearbyCafes) && nearbyCafes.length > 0) {
+          updateCafes(nearbyCafes, false);
+
+          // Background enrichment
+          const unconfirmed = nearbyCafes
+            .filter(c => c.confidence === 'unconfirmed' && !c.id.startsWith('temp-') && !c.id.startsWith('search-'))
+            .map(c => c.id);
+          if (unconfirmed.length > 0) {
+            fetch('/api/enrich-background', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ cafeIds: unconfirmed }),
+            }).catch(() => {});
+          }
+        }
+      }
+    } catch {
+      console.error('[Map] Café search area load failed');
+    }
+
+    // Open the popup for the searched café after markers render
+    setTimeout(() => {
+      const entry = Array.from(markersRef.current.values()).find(
+        e => e.cafe.google_place_id === placeId
+      );
+      if (entry) {
+        entry.marker.togglePopup();
+        map.current?.easeTo({ center: [entry.cafe.lng, entry.cafe.lat], offset: [0, 200], duration: 300 });
+      }
+    }, 800);
+  }, [updateCafes]);
 
   const handleMyLocation = async () => {
     try {
@@ -524,10 +595,12 @@ export default function Map() {
       {/* Search box */}
       <div className="absolute z-30" style={{ top: 10, left: 10 }}>
         <SearchBox
-          onSelect={handleSearch}
+          onSelectCity={handleCitySearch}
+          onSelectCafe={handleCafeSearch}
           onTyping={() => setOverlayDismissed(true)}
           loading={loadingCafes}
           dark={darkMode}
+          mapCenter={map.current ? { lat: map.current.getCenter().lat, lng: map.current.getCenter().lng } : null}
         />
       </div>
 
@@ -665,50 +738,7 @@ export default function Map() {
         </div>
       )}
 
-      {/* Search this area button */}
-      {showSearchArea && !panLoading && !statusMessage && !firstSearchCity && (
-        <div className="absolute left-1/2 -translate-x-1/2 z-20 animate-fade-in" style={{ top: 66 }}>
-          <button
-            onClick={searchThisArea}
-            className="cursor-pointer"
-            style={{
-              background: d ? '#1a1a1a' : '#fff',
-              color: d ? '#e5e7eb' : '#333',
-              border: d ? '1px solid #333' : 'none',
-              borderRadius: 20,
-              padding: '8px 16px',
-              fontSize: 14,
-              fontWeight: 500,
-              boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-            Search this area
-          </button>
-        </div>
-      )}
 
-      {/* Pan loading pill */}
-      {panLoading && !statusMessage && !firstSearchCity && (
-        <div
-          className="absolute left-1/2 -translate-x-1/2 z-20 animate-fade-in whitespace-nowrap"
-          style={{
-            top: 66,
-            background: pillBg,
-            borderRadius: 16,
-            padding: "6px 14px",
-            fontSize: 12,
-            color: pillTextMuted,
-            boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
-            border: cardBorder,
-          }}
-        >
-          Loading cafés...
-        </div>
-      )}
 
       {/* Location toast */}
       {locationState === "locating" && !statusMessage && (
@@ -768,7 +798,40 @@ export default function Map() {
         </div>
       )}
 
-      {/* Filter toolbar */}
+      {/* Search this area button — top center */}
+      {showSearchArea && !panLoading && !statusMessage && !firstSearchCity && !popupOpen && (
+        <div className="absolute left-1/2 -translate-x-1/2 z-20 animate-fade-in" style={{ top: 66 }}>
+          <button
+            onClick={searchThisArea}
+            className="cursor-pointer"
+            style={{
+              background: d ? '#1a1a1a' : '#fff',
+              color: d ? '#e5e7eb' : '#333',
+              border: d ? '1px solid #333' : 'none',
+              borderRadius: 20,
+              padding: '8px 16px',
+              fontSize: 14,
+              fontWeight: 500,
+              boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            Search this area
+          </button>
+        </div>
+      )}
+
+      {/* Pan loading pill — top center */}
+      {panLoading && !statusMessage && !firstSearchCity && (
+        <div className="absolute left-1/2 -translate-x-1/2 z-20 animate-fade-in" style={{ top: 66, background: d ? '#1a1a1a' : '#fff', borderRadius: 16, padding: '6px 14px', fontSize: 12, color: d ? '#888' : '#5f6368', boxShadow: '0 1px 4px rgba(0,0,0,0.2)', border: d ? '1px solid #333' : 'none' }}>
+          Loading cafés...
+        </div>
+      )}
+
+      {/* Filter toolbar — bottom center */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20">
         <Filters filters={filters} onChange={setFilters} dark={darkMode} />
       </div>

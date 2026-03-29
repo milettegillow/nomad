@@ -12,7 +12,11 @@ html, body {
   background: #f8f9fa;
 }
 
-/* Mapbox popup — neutral shell (colors handled inline) */
+/* Mapbox popup */
+.mapboxgl-popup {
+  z-index: 100 !important;
+}
+
 .mapboxgl-popup-content {
   background: transparent !important;
   border: none !important;
@@ -20,6 +24,8 @@ html, body {
   padding: 0 !important;
   box-shadow: 0 2px 16px rgba(0,0,0,0.25) !important;
   overflow: visible !important;
+  max-height: 70vh !important;
+  overflow-y: auto !important;
 }
 
 .mapboxgl-popup-close-button {

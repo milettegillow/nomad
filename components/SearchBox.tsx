@@ -2,26 +2,44 @@
 
 import { useState, useRef, useEffect } from 'react';
 
-interface SearchResult {
+interface CityResult {
+  type: 'city';
   id: string;
   place_name: string;
   text: string;
   center: [number, number];
 }
 
+interface CafeResult {
+  type: 'cafe';
+  place_id: string;
+  name: string;
+  address: string | null;
+  lat: number;
+  lng: number;
+  rating: number | null;
+  photo_name: string | null;
+}
+
+type SearchItem = CityResult | CafeResult;
+
 export default function SearchBox({
-  onSelect,
+  onSelectCity,
+  onSelectCafe,
   onTyping,
   loading,
   dark,
+  mapCenter,
 }: {
-  onSelect: (lng: number, lat: number, cityName: string) => void;
+  onSelectCity: (lng: number, lat: number, cityName: string) => void;
+  onSelectCafe: (lat: number, lng: number, placeId: string, name: string, rating: number | null, address: string | null, photoName: string | null) => void;
   onTyping?: () => void;
   loading?: boolean;
   dark?: boolean;
+  mapCenter?: { lat: number; lng: number } | null;
 }) {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [items, setItems] = useState<SearchItem[]>([]);
   const [open, setOpen] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -41,48 +59,78 @@ export default function SearchBox({
     if (q.trim()) onTyping?.();
     clearTimeout(timerRef.current);
     if (!q.trim()) {
-      setResults([]);
+      setItems([]);
       setOpen(false);
       return;
     }
     timerRef.current = setTimeout(async () => {
+      const [cityRes, cafeRes] = await Promise.all([
+        fetchCities(q),
+        fetchCafes(q),
+      ]);
+      // Merge: cities first, then cafés, max 6 total
+      const merged: SearchItem[] = [...cityRes.slice(0, 3), ...cafeRes.slice(0, 3)].slice(0, 6);
+      setItems(merged);
+      setOpen(merged.length > 0);
+    }, 250);
+  };
+
+  const fetchCities = async (q: string): Promise<CityResult[]> => {
+    try {
       const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
       const res = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${token}&limit=8&types=place,locality,neighborhood`
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${token}&limit=3&types=place,locality,neighborhood`
       );
       const data = await res.json();
-      if (data.features) {
-        setResults(
-          data.features.map((f: { id: string; place_name: string; text: string; center: [number, number] }) => ({
-            id: f.id,
-            place_name: f.place_name,
-            text: f.text,
-            center: f.center,
-          }))
-        );
-        setOpen(true);
-      }
-    }, 200);
+      return (data.features || []).map((f: { id: string; place_name: string; text: string; center: [number, number] }) => ({
+        type: 'city' as const,
+        id: f.id,
+        place_name: f.place_name,
+        text: f.text,
+        center: f.center,
+      }));
+    } catch {
+      return [];
+    }
   };
 
-  const select = (result: SearchResult) => {
-    setQuery(result.place_name);
+  const fetchCafes = async (q: string): Promise<CafeResult[]> => {
+    try {
+      const locParam = mapCenter ? `&lat=${mapCenter.lat}&lng=${mapCenter.lng}` : '';
+      const res = await fetch(`/api/search-place?q=${encodeURIComponent(q)}${locParam}`);
+      const data = await res.json();
+      return (data.results || []).map((r: { place_id: string; name: string; address: string | null; lat: number; lng: number; rating: number | null; photo_name: string | null }) => ({
+        type: 'cafe' as const,
+        ...r,
+      }));
+    } catch {
+      return [];
+    }
+  };
+
+  const selectItem = (item: SearchItem) => {
+    if (item.type === 'city') {
+      setQuery(item.place_name);
+      onSelectCity(item.center[0], item.center[1], item.text);
+    } else {
+      setQuery(item.name);
+      onSelectCafe(item.lat, item.lng, item.place_id, item.name, item.rating, item.address, item.photo_name);
+    }
     setOpen(false);
-    setResults([]);
-    onSelect(result.center[0], result.center[1], result.text);
+    setItems([]);
   };
 
-  const bg = dark ? '#1a1a1a' : '#fff';
-  const text = dark ? '#fff' : '#333';
-  const placeholder = dark ? '#888' : undefined;
-  const border = dark ? '1px solid #333' : 'none';
-  const spinnerBorder = dark ? 'border-gray-600 border-t-blue-400' : 'border-gray-300 border-t-blue-500';
-  const iconColor = dark ? '#888' : undefined;
-  const dropdownBg = dark ? '#1a1a1a' : '#fff';
-  const hoverBg = dark ? '#2a2a2a' : '#f5f5f5';
-  const divider = dark ? '#333' : '#f0f0f0';
-  const primaryColor = dark ? '#fff' : '#202124';
-  const secondaryColor = dark ? '#888' : '#666';
+  const d = dark;
+  const bg = d ? '#1a1a1a' : '#fff';
+  const text = d ? '#fff' : '#333';
+  const border = d ? '1px solid #333' : 'none';
+  const spinnerBorder = d ? 'border-gray-600 border-t-blue-400' : 'border-gray-300 border-t-blue-500';
+  const iconColor = d ? '#888' : undefined;
+  const dropdownBg = d ? '#1a1a1a' : '#fff';
+  const hoverBg = d ? '#2a2a2a' : '#f5f5f5';
+  const dividerColor = d ? '#333' : '#f0f0f0';
+  const primaryColor = d ? '#fff' : '#202124';
+  const secondaryColor = d ? '#888' : '#666';
 
   return (
     <div ref={containerRef} className="relative" style={{ width: 400 }}>
@@ -98,32 +146,45 @@ export default function SearchBox({
           type="text"
           value={query}
           onChange={(e) => search(e.target.value)}
-          placeholder="Search a city..."
+          placeholder="Search a city or café..."
           style={{ height: 46, borderRadius: 8, paddingLeft: 40, background: bg, color: text, border: 'none' }}
-          className={`w-full pr-4 outline-none text-base ${dark ? 'placeholder-gray-500' : 'placeholder-gray-400'}`}
+          className={`w-full pr-4 outline-none text-base ${d ? 'placeholder-gray-500' : 'placeholder-gray-400'}`}
         />
       </div>
-      {open && results.length > 0 && (
+      {open && items.length > 0 && (
         <ul className="absolute top-full mt-1 w-full overflow-hidden z-50" style={{ borderRadius: 8, boxShadow: '0 2px 6px rgba(0,0,0,0.3)', background: dropdownBg, border }}>
-          {results.map((r, i) => {
-            const commaIdx = r.place_name.indexOf(',');
-            const primary = commaIdx > -1 ? r.place_name.substring(0, commaIdx) : r.place_name;
-            const secondary = commaIdx > -1 ? r.place_name.substring(commaIdx + 1).trim() : null;
+          {items.map((item, i) => {
+            const isCity = item.type === 'city';
+            const icon = isCity ? '📍' : '☕';
+            let primary: string;
+            let secondary: string | null;
+
+            if (isCity) {
+              const commaIdx = item.place_name.indexOf(',');
+              primary = commaIdx > -1 ? item.place_name.substring(0, commaIdx) : item.place_name;
+              secondary = commaIdx > -1 ? item.place_name.substring(commaIdx + 1).trim() : null;
+            } else {
+              primary = item.name + (item.rating != null ? ` ⭐ ${item.rating}` : '');
+              secondary = item.address;
+            }
+
             return (
-              <li key={r.id}>
+              <li key={isCity ? item.id : item.place_id}>
                 <button
-                  onClick={() => select(r)}
+                  onClick={() => selectItem(item)}
                   className="w-full text-left transition-colors"
                   style={{
-                    padding: '14px 20px',
-                    borderBottom: i < results.length - 1 ? `1px solid ${divider}` : 'none',
+                    padding: '12px 20px',
+                    borderBottom: i < items.length - 1 ? `1px solid ${dividerColor}` : 'none',
                     background: 'transparent',
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = hoverBg; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                 >
-                  <div style={{ fontSize: 15, fontWeight: 500, color: primaryColor }}>{primary}</div>
-                  {secondary && <div style={{ fontSize: 13, color: secondaryColor, marginTop: 2 }}>{secondary}</div>}
+                  <div style={{ fontSize: 15, fontWeight: 500, color: primaryColor }}>
+                    <span style={{ marginRight: 8 }}>{icon}</span>{primary}
+                  </div>
+                  {secondary && <div style={{ fontSize: 13, color: secondaryColor, marginTop: 2, paddingLeft: 26 }}>{secondary}</div>}
                 </button>
               </li>
             );
