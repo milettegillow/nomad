@@ -7,11 +7,13 @@ export default function CorrectionPanel({
   cafe,
   onClose,
   onSubmitted,
+  onUpdate,
   darkMode = false,
 }: {
   cafe: Cafe;
   onClose: () => void;
-  onSubmitted: () => void;
+  onSubmitted: (updates: { laptop_allowed?: boolean | null; wifi_rating?: number | null; seating_rating?: number | null }) => void;
+  onUpdate: (updates: { laptop_allowed?: boolean | null; wifi_rating?: number | null; seating_rating?: number | null; notes?: string }) => void;
   darkMode?: boolean;
 }) {
   const [laptopAllowed, setLaptopAllowed] = useState<boolean | null>(null);
@@ -38,7 +40,16 @@ export default function CorrectionPanel({
         }),
       });
       setSuccess(true);
-      setTimeout(onSubmitted, 1200);
+
+      // Immediately update the marker via parent state
+      const updates: { laptop_allowed?: boolean | null; wifi_rating?: number | null; seating_rating?: number | null } = {};
+      if (laptopAllowed !== null) updates.laptop_allowed = laptopAllowed;
+      if (wifiRating !== null) updates.wifi_rating = wifiRating;
+      if (seatingRating !== null) updates.seating_rating = seatingRating;
+      onSubmitted(updates);
+
+      // Close panel after 2 seconds — popup stays open
+      setTimeout(onClose, 3000);
     } catch {
       setSubmitting(false);
     }

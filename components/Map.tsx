@@ -476,7 +476,7 @@ export default function Map() {
     flyToAndSearch(lng, lat, cityName);
   };
 
-  const handleCafeSearch = useCallback(async (lat: number, lng: number, placeId: string, cafeName: string, rating: number | null, address: string | null, photoName: string | null) => {
+  const handleCafeSearch = useCallback(async (lat: number, lng: number, placeId: string, cafeName: string, rating: number | null, address: string | null, photoName: string | null, dbId: string | null) => {
     if (!map.current) return;
     skipNextMoveEnd.current = true;
     setOverlayDismissed(true);
@@ -484,7 +484,7 @@ export default function Map() {
 
     // Create a placeholder café with data from search
     const placeholderCafe: Cafe = {
-      id: `search-${placeId}`,
+      id: dbId || `search-${placeId}`,
       name: cafeName,
       lat,
       lng,
@@ -840,13 +840,19 @@ export default function Map() {
         <CorrectionPanel
           cafe={correctionCafe}
           darkMode={darkMode}
-          onClose={() => setCorrectionCafe(null)}
-          onSubmitted={() => {
+          onClose={() => {
             setCorrectionCafe(null);
-            if (map.current) {
-              const center = map.current.getCenter();
-              searchCityRef.current(center.lat, center.lng);
-            }
+            // Flush updated café data to state → markers re-render with new colors
+            setCafes([...allCafesRef.current]);
+          }}
+          onSubmitted={(updates) => {
+            // Update ref silently — don't trigger re-render yet (keeps popup open)
+            const cafeId = correctionCafe.id;
+            allCafesRef.current = allCafesRef.current.map(c =>
+              c.id === cafeId
+                ? { ...c, ...updates, confidence: 'inferred' as const, enrichment_reason: 'User submission' }
+                : c
+            );
           }}
         />
       )}

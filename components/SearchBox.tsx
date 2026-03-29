@@ -12,6 +12,7 @@ interface CityResult {
 
 interface CafeResult {
   type: 'cafe';
+  id: string | null;
   place_id: string;
   name: string;
   address: string | null;
@@ -32,7 +33,7 @@ export default function SearchBox({
   mapCenter,
 }: {
   onSelectCity: (lng: number, lat: number, cityName: string) => void;
-  onSelectCafe: (lat: number, lng: number, placeId: string, name: string, rating: number | null, address: string | null, photoName: string | null) => void;
+  onSelectCafe: (lat: number, lng: number, placeId: string, name: string, rating: number | null, address: string | null, photoName: string | null, dbId: string | null) => void;
   onTyping?: () => void;
   loading?: boolean;
   dark?: boolean;
@@ -99,7 +100,7 @@ export default function SearchBox({
       const locParam = mapCenter ? `&lat=${mapCenter.lat}&lng=${mapCenter.lng}` : '';
       const res = await fetch(`/api/search-place?q=${encodeURIComponent(q)}${locParam}`);
       const data = await res.json();
-      return (data.results || []).map((r: { place_id: string; name: string; address: string | null; lat: number; lng: number; rating: number | null; photo_name: string | null }) => ({
+      return (data.results || []).map((r: { id: string | null; place_id: string; name: string; address: string | null; lat: number; lng: number; rating: number | null; photo_name: string | null }) => ({
         type: 'cafe' as const,
         ...r,
       }));
@@ -114,7 +115,7 @@ export default function SearchBox({
       onSelectCity(item.center[0], item.center[1], item.text);
     } else {
       setQuery(item.name);
-      onSelectCafe(item.lat, item.lng, item.place_id, item.name, item.rating, item.address, item.photo_name);
+      onSelectCafe(item.lat, item.lng, item.place_id, item.name, item.rating, item.address, item.photo_name, item.id);
     }
     setOpen(false);
     setItems([]);
