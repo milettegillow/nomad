@@ -54,20 +54,36 @@ export async function POST(request: Request) {
     return Response.json({ error: 'city required' }, { status: 400 });
   }
 
-  console.log('[Search Blogs] Starting Brave Search for:', city);
+  const isLondon = city.toLowerCase().includes('london');
+  console.log(`[Search Blogs] Starting Brave Search for: ${city}${isLondon ? ' [LONDON DEEP SEARCH]' : ''}`);
   const startTime = Date.now();
 
   try {
-    // 5 parallel Brave Search queries
-    const [results1, results2, results3, results4, results5] = await Promise.all([
-      braveSearch(`best cafes to work from in ${city}`),
-      braveSearch(`best coworking cafes ${city}`),
-      braveSearch(`laptop friendly cafes ${city} wifi`),
-      braveSearch(`remote work digital nomad cafe ${city}`),
-      braveSearch(`site:reddit.com "${city}" cafe laptop wifi working`),
-    ]);
+    const queries = isLondon
+      ? [
+          `best cafes to work from in London`,
+          `best coworking cafes London 2024 2025`,
+          `laptop friendly cafes London wifi`,
+          `best coffee shops for remote work London`,
+          `digital nomad cafes London`,
+          `best cafes to study in London`,
+          `London cafes good for working from laptop reddit`,
+          `best neighbourhood cafes work London Shoreditch Soho Hackney Brixton`,
+        ]
+      : [
+          `best cafes to work from in ${city}`,
+          `best coworking cafes ${city}`,
+          `laptop friendly cafes ${city} wifi`,
+          `remote work digital nomad cafe ${city}`,
+          `site:reddit.com "${city}" cafe laptop wifi working`,
+        ];
 
-    const allResults = [...results1, ...results2, ...results3, ...results4, ...results5];
+    if (isLondon) {
+      console.log(`[London Special] Running expanded search with ${queries.length} queries`);
+    }
+
+    const allQueryResults = await Promise.all(queries.map(q => braveSearch(q)));
+    const allResults = allQueryResults.flat();
 
     // Deduplicate by URL
     const seen = new Set<string>();

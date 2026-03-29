@@ -117,8 +117,15 @@ export async function GET(request: Request) {
   console.log('[Pan Search] Supabase found:', existing?.length ?? 0, 'existing cafés');
 
   // Always fetch from Google Places to discover new cafés
-  const places = await googleNearbySearch(lat, lng);
-  console.log('[Pan Search] Google Places returned:', places.length, 'cafés');
+  const rawPlaces = await googleNearbySearch(lat, lng);
+  const cafeTypesGet = ['cafe', 'coffee_shop', 'bakery', 'food', 'restaurant', 'bar'];
+  const nonCafeKwGet = ['climbing', 'gym', 'fitness', 'hotel', 'hostel', 'pharmacy', 'bank', 'supermarket', 'market', 'pub', 'wine', 'beer'];
+  const places = rawPlaces.filter(p => {
+    if (!p.types?.some(t => cafeTypesGet.includes(t))) return false;
+    const n = (p.displayName?.text || '').toLowerCase();
+    return !nonCafeKwGet.some(kw => n.includes(kw));
+  });
+  console.log('[Pan Search] Google Places returned:', rawPlaces.length, '→ filtered to', places.length, 'cafés');
 
   if (places.length === 0) {
     console.log('[Pan Search] Returning', existing?.length ?? 0, 'existing only');
@@ -303,11 +310,27 @@ export async function POST(request: Request) {
         send({ type: 'status', message: `📰 Searching blogs for best work cafés in ${city}...` });
         console.log('[Pipeline] Starting blog search + nearby search in parallel for:', city);
 
-        const [blogSnippets, nearbyPlaces] = await Promise.all([
+        const isLondon = city.toLowerCase().includes('london');
+
+        // Run blog search + Google Places nearby in parallel
+        const nearbySearches: Promise<GooglePlace[]>[] = isLondon
+          ? [
+              googleNearbySearch(51.5074, -0.1278),   // Central London
+              googleNearbySearch(51.5250, -0.0740),   // Shoreditch/Hackney
+              googleNearbySearch(51.4613, -0.1156),   // Brixton/Peckham
+            ]
+          : [googleNearbySearch(lat, lng)];
+
+        if (isLondon) {
+          console.log(`[London Special] Running expanded search with 3 neighbourhoods`);
+        }
+
+        const [blogSnippets, ...nearbyResults] = await Promise.all([
           searchBlogs(city, origin),
-          googleNearbySearch(lat, lng),
+          ...nearbySearches,
         ]);
 
+        const nearbyPlaces = nearbyResults.flat();
         console.log('[Pipeline] Blog snippets:', blogSnippets.length, '| Nearby places:', nearbyPlaces.length);
 
         // Build a single blog context string from all snippets
@@ -323,8 +346,25 @@ export async function POST(request: Request) {
         for (const p of nearbyPlaces) {
           if (p.id && !allPlacesMap.has(p.id)) allPlacesMap.set(p.id, p);
         }
-        const allPlaces = Array.from(allPlacesMap.values());
-        console.log('[Pipeline] Total unique places:', allPlaces.length);
+
+        // Filter out non-cafés
+        const cafeTypes = ['cafe', 'coffee_shop', 'bakery', 'food', 'restaurant', 'bar'];
+        const nonCafeKeywords = ['climbing', 'gym', 'fitness', 'hotel', 'hostel', 'pharmacy', 'bank', 'supermarket', 'market', 'pub', 'wine', 'beer'];
+        const allPlaces = Array.from(allPlacesMap.values()).filter(p => {
+          const hasType = p.types?.some(t => cafeTypes.includes(t));
+          if (!hasType) {
+            console.log(`[Filter] Removed ${p.displayName?.text} — no café type`);
+            return false;
+          }
+          const nameLower = (p.displayName?.text || '').toLowerCase();
+          const badKeyword = nonCafeKeywords.find(kw => nameLower.includes(kw));
+          if (badKeyword) {
+            console.log(`[Filter] Removed ${p.displayName?.text} — name contains "${badKeyword}"`);
+            return false;
+          }
+          return true;
+        });
+        console.log('[Pipeline] Total unique cafés after filtering:', allPlaces.length, isLondon ? '(London multi-area)' : '');
 
         if (allPlaces.length === 0) {
           send({ type: 'status', message: 'No cafés found in this area' });

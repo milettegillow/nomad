@@ -491,9 +491,12 @@ export default function Map() {
       })
       // Render green (laptop_allowed=true) last so they appear on top
       .sort((a, b) => {
-        if (a.laptop_allowed === true && b.laptop_allowed !== true) return 1;
-        if (b.laptop_allowed === true && a.laptop_allowed !== true) return -1;
-        return 0;
+        const priority = (c: Cafe) => {
+          if (c.laptop_allowed === true) return 3;  // green — top
+          if (c.laptop_allowed === false) return 2;  // red — middle
+          return 1;  // yellow — bottom
+        };
+        return priority(a) - priority(b);
       });
 
     filtered.forEach((cafe) => {
